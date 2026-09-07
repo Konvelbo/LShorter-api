@@ -80,6 +80,8 @@ links.post(
 
     const SYSTEM_DOMAINS = new Set([
       'lsho.cc',
+      'www.lsho.cc',
+      'api.lsho.cc',
       'lshorter-api.fiatechnologiecam.workers.dev',
       'lshorter-api.fiatechnologiecam.workers.dev/r',
       (c.env.DEFAULT_DOMAIN || 'lsho.cc').toLowerCase(),
@@ -87,13 +89,11 @@ links.post(
     const isCustomDomain = Boolean(
       domainName &&
       !SYSTEM_DOMAINS.has(domainName.toLowerCase()) &&
-      !domainName.toLowerCase().includes('workers.dev') &&
-      domainName !== 'qlsk.cc' &&
-      domainName !== 'qk.link'
+      !domainName.toLowerCase().includes('workers.dev')
     );
     const resolvedDomain = isCustomDomain
       ? domainName!
-      : (domainName?.includes('workers.dev') ? 'lshorter-api.fiatechnologiecam.workers.dev/r' : 'lsho.cc');
+      : (domainName?.includes('workers.dev') ? 'lshorter-api.fiatechnologiecam.workers.dev/r' : (c.env.DEFAULT_DOMAIN || 'lsho.cc'));
 
     // Infinite redirect check
     const defaultDom = (c.env.DEFAULT_DOMAIN || 'lsho.cc').toLowerCase();

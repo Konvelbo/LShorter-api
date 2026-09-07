@@ -4,24 +4,35 @@
   "main": "src/index.ts",
   "compatibility_date": "2026-07-24",
   "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": true,
+
+  // ─── Custom Domain Routes (Cloudflare Edge) ───────────────────────────────
+  // Note: À décommenter une fois que "lsho.cc" est actif dans votre compte Cloudflare
+  // "routes": [
+  //   { "pattern": "lsho.cc", "custom_domain": true },
+  //   { "pattern": "api.lsho.cc", "custom_domain": true }
+  // ],
 
   // ─── Variables non-sensibles (publiques) ──────────────────────────────────
   "vars": {
-    "DEFAULT_DOMAIN": "lsho.cc"
+    "DEFAULT_DOMAIN": "lsho.cc",
+    "ALLOWED_ORIGINS": "http://localhost:3000,https://lsho.cc,https://www.lsho.cc,https://api.lsho.cc,https://lshorter-api.fiatechnologiecam.workers.dev"
   },
 
   // ─── Variables sensibles ──────────────────────────────────────────────────
   // CF_ACCOUNT_ID et CF_API_TOKEN doivent être définis via :
   //   npx wrangler secret put CF_ACCOUNT_ID
   //   npx wrangler secret put CF_API_TOKEN
+  //   npx wrangler secret put FRONTEND_API_SECRET
+  //   npx wrangler secret put HASH_SALT
   // Elles seront alors chiffrées et injectées automatiquement par Cloudflare.
 
   // ─── Cache KV (redirections rapides) ─────────────────────────────────────
   "kv_namespaces": [
     {
       "binding": "URL_KV",
-      "id": "26a244d5e6c54e99bd608c4c5ec47f86",
-    },
+      "id": "26a244d5e6c54e99bd608c4c5ec47f86"
+    }
   ],
 
   // ─── Base de données D1 (SQLite) ──────────────────────────────────────────
@@ -29,7 +40,7 @@
     {
       "binding": "DB",
       "database_name": "quicklink-db",
-      "database_id": "08169b58-e8d7-491e-9a4c-cd74771c359a",
-    },
-  ],
+      "database_id": "08169b58-e8d7-491e-9a4c-cd74771c359a"
+    }
+  ]
 }

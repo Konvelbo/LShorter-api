@@ -168,7 +168,7 @@ class HttpClient {
   private readonly apiKey:  string;
 
   constructor(config: QuickLinkConfig) {
-    this.baseUrl = (config.baseUrl ?? 'https://api.qk.link').replace(/\/$/, '');
+    this.baseUrl = (config.baseUrl ?? 'https://api.lsho.cc').replace(/\/$/, '');
     this.apiKey  = config.apiKey;
   }
 

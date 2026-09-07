@@ -57,6 +57,9 @@ CREATE TABLE IF NOT EXISTS links (
     is_password_protected BOOLEAN DEFAULT 0,
     is_cloaked BOOLEAN DEFAULT 0,
     meta_title TEXT,
+    og_title TEXT,
+    og_description TEXT,
+    og_image TEXT,
     hide_referrer BOOLEAN DEFAULT 0,
     tags TEXT, -- JSON array
     expires_at DATETIME,

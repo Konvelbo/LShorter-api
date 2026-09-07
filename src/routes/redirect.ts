@@ -267,7 +267,7 @@ async function handleRedirect(
       const submittedHash = await sha256(submitted);
 
       if (submittedHash !== link.passwordHash) {
-        return passwordPage(slug, domainName, true); // wrong password
+        return passwordPage(decodedSlug, domainName, true); // wrong password
       }
       // Correct password — fall through to redirect below
     } else {
@@ -276,7 +276,7 @@ async function handleRedirect(
       const cookieName   = `ql_auth_${link.id}`;
       const hasCookie    = cookieHeader.includes(`${cookieName}=${link.passwordHash}`);
       if (!hasCookie) {
-        return passwordPage(slug, domainName, false);
+        return passwordPage(decodedSlug, domainName, false);
       }
     }
   }
