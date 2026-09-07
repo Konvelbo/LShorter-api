@@ -45,34 +45,33 @@ const handleUserSync = async (c: any) => {
     );
   }
 
-  const { id: providedId, name, plan, avatarUrl } = parsed.data;
+  const { id: providedId, name, plan } = parsed.data;
   const email = parsed.data.email.trim().toLowerCase();
   const id = providedId || uid("usr");
   const timestamp = now();
 
   try {
-    // Upsert into D1 users table
+    // Upsert into D1 users table (columns: id, email, name, plan, created_at, updated_at)
     await c.env.DB.prepare(
-      `INSERT INTO users (id, email, name, plan, avatar_url, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?)
+      `INSERT INTO users (id, email, name, plan, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?)
        ON CONFLICT(id) DO UPDATE SET
          name = COALESCE(excluded.name, users.name),
          email = excluded.email,
          plan = excluded.plan,
-         avatar_url = COALESCE(excluded.avatar_url, users.avatar_url),
          updated_at = excluded.updated_at`,
     )
-      .bind(id, email, name ?? null, plan, avatarUrl ?? null, timestamp, timestamp)
+      .bind(id, email, name ?? null, plan, timestamp, timestamp)
       .run();
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : String(e);
     if (msg.includes("UNIQUE") && msg.includes("email")) {
       // If email is unique but ID is different, update by email
       await c.env.DB.prepare(
-        `UPDATE users SET name = COALESCE(?, name), plan = ?, avatar_url = COALESCE(?, avatar_url), updated_at = ?
+        `UPDATE users SET name = COALESCE(?, name), plan = ?, updated_at = ?
          WHERE email = ?`,
       )
-        .bind(name ?? null, plan, avatarUrl ?? null, timestamp, email)
+        .bind(name ?? null, plan, timestamp, email)
         .run();
     } else {
       throw e;
@@ -91,7 +90,7 @@ users.get("/me", authMiddleware, async (c) => {
   const { userId } = c.get("auth");
 
   const row = await c.env.DB.prepare(
-    `SELECT id, email, name, plan, created_at FROM users WHERE id = ?`,
+    `SELECT id, email, name, plan, created_at, updated_at FROM users WHERE id = ?`,
   )
     .bind(userId)
     .first();
@@ -107,6 +106,7 @@ const UpdateUserSchema = z.object({
 });
 
 users.patch("/:userId", authMiddleware, async (c) => {
+  const targetUserId = c.req.param("userId");
   const { userId: callerId } = c.get("auth");
   const frontendSecret = c.req.header("X-Frontend-Secret");
   const authHeader = c.req.header("Authorization");
@@ -150,7 +150,7 @@ users.patch("/:userId", authMiddleware, async (c) => {
   if (!result.meta.changes) return err("User not found", 404, "NOT_FOUND");
 
   const updated = await c.env.DB.prepare(
-    `SELECT id, email, name, plan, created_at FROM users WHERE id = ?`
+    `SELECT id, email, name, plan, created_at, updated_at FROM users WHERE id = ?`
   ).bind(targetUserId).first();
 
   return ok(updated);
