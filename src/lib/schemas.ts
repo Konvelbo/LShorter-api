@@ -69,6 +69,10 @@ export const CreateLinkSchema = z.object({
   qrCodeConfig:    z.any().optional().nullable(),
   routingRules:    z.any().optional().nullable(),
   userId:          z.string().optional().nullable(),
+  maxClicks:       z.any().optional().nullable(),
+  max_clicks:      z.any().optional().nullable(),
+  fallbackUrl:     z.string().optional().nullable(),
+  fallback_url:    z.string().optional().nullable(),
 });
 
 export type CreateLinkInput = z.infer<typeof CreateLinkSchema>;
@@ -80,16 +84,22 @@ export const UpdateLinkSchema = z.object({
   slug:            z.string().min(1).max(64).regex(/^[a-zA-Z0-9_-]+$/).optional(),
   geoTargeting:    geoTargeting,
   deviceTargeting: deviceTargeting,
+  routingRules:    z.any().optional().nullable(),
+  routing_rules:   z.any().optional().nullable(),
   isActive:        z.boolean().optional(),
-  expiresAt:       z.string().datetime().optional().nullable(),
-  password:        z.string().min(4).max(64).optional().nullable(),   // null = remove password
-  tags:            z.array(z.string().min(1).max(32)).max(10).optional().nullable(),
+  expiresAt:       z.any().optional().nullable(),
+  password:        z.string().min(1).max(64).optional().nullable(),   // null = remove password
+  tags:            z.any().optional().nullable(),
   isCloaked:       z.boolean().optional(),
   hideReferrer:    z.boolean().optional(),
   metaTitle:       z.string().max(120).optional().nullable(),
   ogTitle:         z.string().max(160).optional().nullable(),
   ogDescription:   z.string().max(300).optional().nullable(),
   ogImage:         z.string().optional().nullable(),
+  maxClicks:       z.any().optional().nullable(),
+  max_clicks:      z.any().optional().nullable(),
+  fallbackUrl:     z.string().optional().nullable(),
+  fallback_url:    z.string().optional().nullable(),
 }).refine(data => Object.values(data).some(v => v !== undefined), {
   message: 'At least one field must be provided for update',
 });

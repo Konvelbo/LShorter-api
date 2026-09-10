@@ -218,7 +218,7 @@ async function handleRedirect(
     const row = await c.env.DB.prepare(
       `SELECT id, user_id, target_url, routing_rules, geo_targeting, device_targeting,
               is_active, expires_at, password_hash, is_cloaked, hide_referrer, meta_title,
-              og_title, og_description, og_image
+              og_title, og_description, og_image, clicks_count, max_clicks, fallback_url
        FROM links
        WHERE (slug = ? OR slug = ? OR slug = ? OR LOWER(slug) = LOWER(?) OR LOWER(slug) = LOWER(?))
        ORDER BY created_at DESC
@@ -230,11 +230,16 @@ async function handleRedirect(
       password_hash: string | null; is_cloaked: number; hide_referrer: number;
       meta_title: string | null;
       og_title: string | null; og_description: string | null; og_image: string | null;
+      clicks_count: number | null; max_clicks: number | null; fallback_url: string | null;
     }>();
 
     if (!row) return c.text('Short link not found', 404);
     if (row.is_active === 0) return c.text('This link has been paused.', 403);
     if (row.expires_at && new Date(row.expires_at) < new Date()) return c.text('This link has expired.', 410);
+    if (row.max_clicks && row.max_clicks > 0 && (row.clicks_count || 0) >= row.max_clicks) {
+      if (row.fallback_url) return c.redirect(row.fallback_url, 307);
+      return c.text('This link has reached its maximum access limit.', 410);
+    }
 
     link = {
       id:              row.id,
@@ -311,7 +316,7 @@ async function handleRedirect(
   const ipHash    = await sha256(rawIp + salt);
   const referer   = c.req.header('referer') ?? 'Direct';
   const resolvedCountry = country && country !== 'XX' ? country : (c.req.header('cf-ipcountry') || 'BF');
-  const city      = cityReq || (resolvedCountry === 'BF' ? 'Ouagadougou' : 'Paris');
+  const city      = cityReq || (resolvedCountry === 'BF' ? 'Ouagadougou' : 'Direct');
   const linkId = link.id || (link as any).link_id || (link as any).linkId || '';
   const linkUserId = link.userId || (link as any).user_id || 'usr_anonymous';
 
