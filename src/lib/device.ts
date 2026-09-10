@@ -119,3 +119,140 @@ export function resolveGeoTarget(
     return null;
   }
 }
+
+export const REGION_COUNTRIES: Record<string, string[]> = {
+  europe: [
+    "FR", "DE", "GB", "ES", "IT", "BE", "CH", "PT", "NL", "SE",
+    "NO", "DK", "FI", "IE", "AT", "PL", "GR", "RO", "CZ", "HU", "LU"
+  ],
+  west_africa: [
+    "SN", "CI", "BF", "ML", "GN", "TG", "BJ", "NE", "NG", "GH",
+    "CV", "GM", "GW", "LR", "SL"
+  ],
+  central_africa: [
+    "CM", "GA", "CG", "CD", "TD", "CF", "GQ", "ST"
+  ],
+  north_america: [
+    "US", "CA", "MX"
+  ],
+  south_america: [
+    "BR", "AR", "CO", "CL", "PE", "VE", "EC", "BO", "PY", "UY"
+  ],
+  asia: [
+    "CN", "JP", "KR", "IN", "SG", "TH", "VN", "ID", "MY", "PH",
+    "PK", "BD", "AE", "SA", "QA", "KW"
+  ],
+};
+
+/**
+ * Evaluates structured routing rules with multi-condition AND logic.
+ */
+export function evaluateStructuredRoutingRules(
+  rules: any,
+  context: {
+    country: string;
+    device: DeviceInfo;
+    city?: string | null;
+  }
+): string | null {
+  if (!rules) return null;
+  let parsedRules = rules;
+  if (typeof parsedRules === 'string') {
+    try {
+      parsedRules = JSON.parse(parsedRules);
+    } catch {
+      return null;
+    }
+  }
+  if (!Array.isArray(parsedRules) || parsedRules.length === 0) return null;
+
+  const { country, device, city } = context;
+  const upperCountry = (country || '').toUpperCase();
+  const lowerOs = (device?.os || '').toLowerCase();
+  const lowerKey = (device?.key || '').toLowerCase();
+  const lowerDeviceType = (device?.type || '').toLowerCase();
+  const lowerCity = (city || '').toLowerCase();
+
+  for (const rule of parsedRules) {
+    if (!rule) continue;
+    const dest = (rule.destinationUrl || rule.url || rule.destination_url || '').trim();
+    if (!dest) continue;
+
+    const conditions = Array.isArray(rule.conditions) ? rule.conditions : [];
+
+    // Legacy single rule fallback (e.g. { type: 'country', value: 'FR', url: '...' })
+    if (conditions.length === 0 && (rule.type || rule.value)) {
+      const type = String(rule.type || '').toLowerCase();
+      const val = String(rule.value || '').toLowerCase();
+      let match = false;
+      if (type === 'country' || type === 'pays') {
+        match = upperCountry.toLowerCase() === val;
+      } else if (type === 'city') {
+        match = lowerCity === val;
+      } else if (type === 'device' || type === 'appareil') {
+        match = lowerDeviceType === val || lowerKey === val;
+      } else if (type === 'os' || type === 'plateforme') {
+        match = lowerOs === val || (val === 'mac' && lowerOs === 'macos') || (val === 'macos' && lowerOs === 'mac');
+      }
+      if (match) return dest;
+      continue;
+    }
+
+    if (conditions.length === 0) continue;
+
+    // Evaluate all conditions with AND logic
+    let allConditionsMet = true;
+    for (const cond of conditions) {
+      if (!cond || !cond.type || !cond.value) continue;
+      const condType = String(cond.type).toLowerCase();
+      const condVal = String(cond.value).trim().toLowerCase();
+      const op = cond.operator || 'est';
+      let isMatch = false;
+
+      if (condType === 'pays') {
+        isMatch = upperCountry.toLowerCase() === condVal;
+      } else if (condType === 'region') {
+        const regionList = REGION_COUNTRIES[condVal] || [];
+        isMatch = regionList.includes(upperCountry);
+      } else if (condType === 'appareil') {
+        if (condVal === 'mobile') {
+          isMatch = lowerDeviceType === 'mobile' || lowerDeviceType === 'tablet' || lowerKey === 'mobile' || lowerKey === 'ios' || lowerKey === 'android';
+        } else if (condVal === 'tablet') {
+          isMatch = lowerDeviceType === 'tablet' || lowerKey === 'tablet';
+        } else if (condVal === 'desktop') {
+          isMatch = lowerDeviceType === 'desktop' || lowerKey === 'desktop' || lowerKey === 'windows' || lowerKey === 'mac' || lowerKey === 'linux';
+        } else {
+          isMatch = lowerDeviceType === condVal || lowerKey === condVal;
+        }
+      } else if (condType === 'plateforme') {
+        if (condVal === 'ios') {
+          isMatch = lowerOs === 'ios' || lowerKey === 'ios';
+        } else if (condVal === 'android') {
+          isMatch = lowerOs === 'android' || lowerKey === 'android';
+        } else if (condVal === 'windows') {
+          isMatch = lowerOs === 'windows' || lowerKey === 'windows';
+        } else if (condVal === 'macos' || condVal === 'mac') {
+          isMatch = lowerOs === 'macos' || lowerOs === 'mac' || lowerKey === 'mac';
+        } else if (condVal === 'linux') {
+          isMatch = lowerOs === 'linux' || lowerKey === 'linux';
+        } else {
+          isMatch = lowerOs === condVal;
+        }
+      } else {
+        isMatch = true;
+      }
+
+      const conditionResult = op === 'est' ? isMatch : !isMatch;
+      if (!conditionResult) {
+        allConditionsMet = false;
+        break;
+      }
+    }
+
+    if (allConditionsMet) {
+      return dest;
+    }
+  }
+
+  return null;
+}

@@ -5,7 +5,7 @@
 
 import { Context, Hono } from 'hono';
 import { type CloudflareBindings } from '../lib/types';
-import { parseDevice, resolveDeviceTarget, resolveGeoTarget } from '../lib/device';
+import { parseDevice, resolveDeviceTarget, resolveGeoTarget, evaluateStructuredRoutingRules } from '../lib/device';
 import { incrementClickCount } from '../middleware/ratelimit';
 import { uid, now, sha256 } from '../lib/utils';
 
@@ -23,6 +23,10 @@ interface CachedLink {
   ogTitle?:        string | null;
   ogDescription?:  string | null;
   ogImage?:        string | null;
+  maxClicks?:      number | null;
+  max_clicks?:     number | null;
+  fallbackUrl?:    string | null;
+  fallback_url?:   string | null;
 }
 
 const redirect = new Hono<{ Bindings: CloudflareBindings }>();
@@ -236,10 +240,6 @@ async function handleRedirect(
     if (!row) return c.text('Short link not found', 404);
     if (row.is_active === 0) return c.text('This link has been paused.', 403);
     if (row.expires_at && new Date(row.expires_at) < new Date()) return c.text('This link has expired.', 410);
-    if (row.max_clicks && row.max_clicks > 0 && (row.clicks_count || 0) >= row.max_clicks) {
-      if (row.fallback_url) return c.redirect(row.fallback_url, 307);
-      return c.text('This link has reached its maximum access limit.', 410);
-    }
 
     link = {
       id:              row.id,
@@ -255,11 +255,38 @@ async function handleRedirect(
       ogTitle:         row.og_title,
       ogDescription:   row.og_description,
       ogImage:         row.og_image,
+      maxClicks:       row.max_clicks,
+      max_clicks:      row.max_clicks,
+      fallbackUrl:     row.fallback_url,
+      fallback_url:    row.fallback_url,
     };
 
     // Warm the KV cache
     if (!link.passwordHash) {
       await c.env.URL_KV.put(kvKey, JSON.stringify(link), { expirationTtl: 86400 }).catch(() => {});
+    }
+  }
+
+  // 2.5 Strict Quota & Max Clicks check (checks live D1 counter)
+  const configuredMaxClicks = link.maxClicks ?? link.max_clicks;
+  if (configuredMaxClicks && configuredMaxClicks > 0) {
+    const liveLink = await c.env.DB.prepare(
+      `SELECT clicks_count, max_clicks, fallback_url FROM links WHERE id = ? OR slug = ? OR LOWER(slug) = LOWER(?) LIMIT 1`
+    ).bind(link.id, decodedSlug, decodedSlug).first<{
+      clicks_count: number | null;
+      max_clicks: number | null;
+      fallback_url: string | null;
+    }>().catch(() => null);
+
+    const liveClicks = liveLink?.clicks_count ?? 0;
+    const liveMax = liveLink?.max_clicks ?? configuredMaxClicks;
+    const fallbackTarget = liveLink?.fallback_url || link.fallbackUrl || link.fallback_url;
+
+    if (liveMax > 0 && liveClicks >= liveMax) {
+      if (fallbackTarget) {
+        return c.redirect(fallbackTarget, 307);
+      }
+      return c.text('This link has reached its maximum access limit.', 410);
     }
   }
 
@@ -288,20 +315,30 @@ async function handleRedirect(
 
   // 4. Resolve target URL (geo → device → default)
   const ua      = c.req.header('user-agent') ?? '';
-  const country = (c.req.header('cf-ipcountry') ?? 'XX').toUpperCase();
-  const cityReq = c.req.header('cf-ipcity') ?? null;
+  const country = (
+    c.req.header('x-country') ??
+    c.req.header('cf-ipcountry') ??
+    c.req.header('x-vercel-ip-country') ??
+    'XX'
+  ).toUpperCase();
+  const cityReq = c.req.header('x-city') ?? c.req.header('cf-ipcity') ?? null;
   const device  = parseDevice(ua);
 
   let destination = link.targetUrl;
 
-  if (link.routingRules && Array.isArray(link.routingRules)) {
-    for (const rule of link.routingRules) {
-      if (rule.type === 'country' && rule.value === country) { destination = rule.url; break; }
-      if (rule.type === 'city' && cityReq && rule.value.toLowerCase() === cityReq.toLowerCase()) { destination = rule.url; break; }
-      if (rule.type === 'device' && (rule.value === device.key || rule.value === device.type)) { destination = rule.url; break; }
+  // 1. Evaluate structured multi-condition routing rules (highest priority)
+  if (link.routingRules) {
+    const matchedUrl = evaluateStructuredRoutingRules(link.routingRules, {
+      country,
+      device,
+      city: cityReq,
+    });
+    if (matchedUrl) {
+      destination = matchedUrl;
     }
   }
 
+  // 2. Fallback: Legacy Geo / Device targeting maps
   if (destination === link.targetUrl) {
     const geoOverride    = resolveGeoTarget(link.geoTargeting ? JSON.stringify(link.geoTargeting) : null, country);
     const deviceOverride = resolveDeviceTarget(link.deviceTargeting ? JSON.stringify(link.deviceTargeting) : null, device);
@@ -322,26 +359,33 @@ async function handleRedirect(
 
   const trackClick = async () => {
     try {
-      // 1. Update link clicks counter in D1 (match by id or slug)
-      await c.env.DB.prepare(
-        `UPDATE links SET clicks_count = COALESCE(clicks_count, 0) + 1, unique_clicks = COALESCE(unique_clicks, 0) + 1, updated_at = ? WHERE id = ? OR slug = ?`
+      // 1. Update link clicks counter in D1 (strictly capped at max_clicks atomically)
+      const updateRes = await c.env.DB.prepare(
+        `UPDATE links 
+         SET clicks_count = COALESCE(clicks_count, 0) + 1, 
+             unique_clicks = COALESCE(unique_clicks, 0) + 1, 
+             updated_at = ? 
+         WHERE (id = ? OR slug = ?)
+           AND (max_clicks IS NULL OR max_clicks = 0 OR COALESCE(clicks_count, 0) < max_clicks)`
       ).bind(timestamp, linkId, decodedSlug).run();
 
-      // 2. Increment user quota in KV
-      await incrementClickCount(c.env.URL_KV, linkUserId).catch(() => {});
+      if (updateRes.meta.changes > 0) {
+        // 2. Increment user quota in KV
+        await incrementClickCount(c.env.URL_KV, linkUserId).catch(() => {});
 
-      // 3. Cache individual click in KV
-      await c.env.URL_KV.put(
-        `click:${linkId}:${clickId}`,
-        JSON.stringify({ id: clickId, linkId, userId: linkUserId, country: resolvedCountry, device: device.key, os: device.os, timestamp }),
-        { expirationTtl: 90 * 24 * 3600 }
-      ).catch(() => {});
+        // 3. Cache individual click in KV
+        await c.env.URL_KV.put(
+          `click:${linkId}:${clickId}`,
+          JSON.stringify({ id: clickId, linkId, userId: linkUserId, country: resolvedCountry, device: device.key, os: device.os, timestamp }),
+          { expirationTtl: 90 * 24 * 3600 }
+        ).catch(() => {});
 
-      // 4. Detailed analytics event in D1
-      await c.env.DB.prepare(
-        `INSERT INTO click_events (id, link_id, user_id, slug, ip_masked, country_code, city, device, browser, os, referrer, resolved_url, timestamp)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-      ).bind(clickId, linkId, linkUserId, decodedSlug, ipHash, resolvedCountry, city, device.type, device.browser, device.os, referer, destination, timestamp).run();
+        // 4. Detailed analytics event in D1
+        await c.env.DB.prepare(
+          `INSERT INTO click_events (id, link_id, user_id, slug, ip_masked, country_code, city, device, browser, os, referrer, resolved_url, timestamp)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        ).bind(clickId, linkId, linkUserId, decodedSlug, ipHash, resolvedCountry, city, device.type, device.browser, device.os, referer, destination, timestamp).run();
+      }
     } catch (err) {
       console.error('[TrackClick Error]', err);
     }

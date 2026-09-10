@@ -89,34 +89,41 @@ links.post("/:slug/click", async (c) => {
   const clickId = uid("clk");
   const timestamp = now();
 
-  // 1. Update clicks counter in D1 links table
-  await c.env.DB.prepare(
-    `UPDATE links SET clicks_count = COALESCE(clicks_count, 0) + 1, unique_clicks = COALESCE(unique_clicks, 0) + 1, updated_at = ? WHERE id = ?`,
+  // 1. Update clicks counter in D1 links table (strictly capped at max_clicks atomically)
+  const updateRes = await c.env.DB.prepare(
+    `UPDATE links 
+     SET clicks_count = COALESCE(clicks_count, 0) + 1, 
+         unique_clicks = COALESCE(unique_clicks, 0) + 1, 
+         updated_at = ? 
+     WHERE id = ? 
+       AND (max_clicks IS NULL OR max_clicks = 0 OR COALESCE(clicks_count, 0) < max_clicks)`,
   )
     .bind(timestamp, link.id)
     .run();
 
-  // 2. Insert event in D1 click_events table
-  await c.env.DB.prepare(
-    `INSERT INTO click_events (id, link_id, user_id, slug, ip_masked, country_code, city, device, browser, os, referrer, resolved_url, timestamp)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-  )
-    .bind(
-      clickId,
-      link.id,
-      link.user_id,
-      link.slug,
-      ipHash,
-      country,
-      city,
-      device,
-      browser,
-      os,
-      referrer,
-      link.target_url,
-      timestamp,
+  if (updateRes.meta.changes > 0) {
+    // 2. Insert event in D1 click_events table
+    await c.env.DB.prepare(
+      `INSERT INTO click_events (id, link_id, user_id, slug, ip_masked, country_code, city, device, browser, os, referrer, resolved_url, timestamp)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
-    .run();
+      .bind(
+        clickId,
+        link.id,
+        link.user_id,
+        link.slug,
+        ipHash,
+        country,
+        city,
+        device,
+        browser,
+        os,
+        referrer,
+        link.target_url,
+        timestamp,
+      )
+      .run();
+  }
 
   return ok({ success: true, linkId: link.id, clickId });
 });
@@ -460,6 +467,10 @@ links.post(
             ogTitle: ogTitle ?? metaTitle ?? null,
             ogDescription: ogDescription ?? null,
             ogImage: resolvedOgImage ?? null,
+            maxClicks: finalMaxClicks,
+            max_clicks: finalMaxClicks,
+            fallbackUrl: finalFallbackUrl,
+            fallback_url: finalFallbackUrl,
           }),
           { expirationTtl: 86400 * 30 },
         );
@@ -691,6 +702,10 @@ links.patch("/:id", async (c) => {
         ogTitle: updated.og_title || updated.meta_title || null,
         ogDescription: updated.og_description || null,
         ogImage: updated.og_image || null,
+        maxClicks: updated.max_clicks !== null && updated.max_clicks !== undefined ? Number(updated.max_clicks) : null,
+        max_clicks: updated.max_clicks !== null && updated.max_clicks !== undefined ? Number(updated.max_clicks) : null,
+        fallbackUrl: updated.fallback_url || null,
+        fallback_url: updated.fallback_url || null,
       }),
       { expirationTtl: 86400 * 30 },
     ).catch(() => {});

@@ -39,6 +39,7 @@ export interface AuthContext {
   userId: string;
   plan: Plan;
   keyId: string;
+  role?: string;
 }
 
 // ─── DB Row types ─────────────────────────────────────────────────────────────

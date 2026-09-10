@@ -24,30 +24,39 @@ export const authMiddleware: MiddlewareHandler<{
       c.req.header('X-User-Id');
     const userEmail = c.req.header('X-User-Email') || '';
     const userName = c.req.header('X-User-Name') || '';
+    const rawRequestedPlan = c.req.header('X-User-Plan') || c.req.query('plan');
+    const validPlans: Plan[] = ['FREEMIUM', 'STARTER', 'PRO', 'BUSINESS', 'ENTERPRISE'];
+    const requestedPlan: Plan | undefined =
+      rawRequestedPlan && validPlans.includes(rawRequestedPlan.toUpperCase() as Plan)
+        ? (rawRequestedPlan.toUpperCase() as Plan)
+        : undefined;
 
     const finalUserId = targetUserId || 'usr_default';
     const finalEmail = userEmail || `${finalUserId}@lshorter.local`;
     const finalName = userName || 'Dashboard User';
 
-    // Auto-create or update user in D1 with real email and name
+    // Auto-create or update user in D1 with real email, name, and plan
     try {
       await c.env.DB.prepare(
         `INSERT INTO users (id, email, name, plan)
-         VALUES (?, ?, ?, 'FREEMIUM')
+         VALUES (?, ?, ?, COALESCE(?, 'FREEMIUM'))
          ON CONFLICT(id) DO UPDATE SET
            email = CASE WHEN excluded.email NOT LIKE '%@lshorter.local' THEN excluded.email ELSE users.email END,
            name = CASE WHEN excluded.name != 'Dashboard User' THEN excluded.name ELSE users.name END,
+           plan = CASE WHEN ? IS NOT NULL THEN ? ELSE users.plan END,
            updated_at = CURRENT_TIMESTAMP`
-      ).bind(finalUserId, finalEmail, finalName).run();
+      ).bind(finalUserId, finalEmail, finalName, requestedPlan || null, requestedPlan || null, requestedPlan || null).run();
     } catch {}
 
     const userRow = await c.env.DB.prepare(
       `SELECT id, plan FROM users WHERE id = ?`
     ).bind(finalUserId).first<{ id: string; plan: string }>().catch(() => null);
 
+    const activePlan = (userRow?.plan || requestedPlan || 'FREEMIUM') as Plan;
+
     c.set('auth', {
       userId: finalUserId,
-      plan: (userRow?.plan || 'FREEMIUM') as Plan,
+      plan: activePlan,
       keyId: 'frontend_master',
     });
 
