@@ -361,63 +361,70 @@ async function handleRedirect(
     destination = geoOverride ?? deviceOverride ?? link.targetUrl;
   }
 
-  // 5. Fire-and-forget: record click asynchronously (RGPD compliant with Salted SHA-256)
-  const clickId   = uid('clk');
-  const timestamp = now();
-  const rawIp     = c.req.header('cf-connecting-ip') ?? c.req.header('x-forwarded-for') ?? '127.0.0.1';
-  const salt      = c.env.HASH_SALT ?? 'lshorter_rgpd_salt_2026';
-  const ipHash    = await sha256(rawIp + salt);
-  const referer   = c.req.header('referer') ?? 'Direct';
-  const resolvedCountry = country && country !== 'XX' ? country : (c.req.header('cf-ipcountry') || 'BF');
-  const city      = cityReq || (resolvedCountry === 'BF' ? 'Ouagadougou' : 'Direct');
-  const linkId = link.id || (link as any).link_id || (link as any).linkId || '';
-  const linkUserId = link.userId || (link as any).user_id || 'usr_anonymous';
-
-  const trackClick = async () => {
-    try {
-      // 1. Update link clicks counter in D1 (strictly capped at max_clicks atomically)
-      const updateRes = await c.env.DB.prepare(
-        `UPDATE links 
-         SET clicks_count = COALESCE(clicks_count, 0) + 1, 
-             unique_clicks = COALESCE(unique_clicks, 0) + 1, 
-             updated_at = ? 
-         WHERE (id = ? OR slug = ?)
-           AND (max_clicks IS NULL OR max_clicks = 0 OR COALESCE(clicks_count, 0) < max_clicks)`
-      ).bind(timestamp, linkId, decodedSlug).run();
-
-      if (updateRes.meta.changes > 0) {
-        // 2. Increment user quota in KV
-        await incrementClickCount(c.env.URL_KV, linkUserId).catch(() => {});
-
-        // 3. Cache individual click in KV
-        await c.env.URL_KV.put(
-          `click:${linkId}:${clickId}`,
-          JSON.stringify({ id: clickId, linkId, userId: linkUserId, country: resolvedCountry, device: device.key, os: device.os, timestamp }),
-          { expirationTtl: 90 * 24 * 3600 }
-        ).catch(() => {});
-
-        // 4. Detailed analytics event in D1
-        await c.env.DB.prepare(
-          `INSERT INTO click_events (id, link_id, user_id, slug, ip_masked, country_code, city, device, browser, os, referrer, resolved_url, timestamp)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-        ).bind(clickId, linkId, linkUserId, decodedSlug, ipHash, resolvedCountry, city, device.type, device.browser, device.os, referer, destination, timestamp).run();
-      }
-    } catch (err) {
-      console.error('[TrackClick Error]', err);
-    }
-  };
-
-  try {
-    await trackClick();
-  } catch (err) {
-    console.error('[TrackClick Error]', err);
-  }
-
   // 5.5 Check for Social Crawler (Twitterbot, WhatsApp, Facebook, LinkedIn, Discord, etc.)
-  if (isSocialBot(ua) || c.req.query('preview') === '1') {
+  const isBot = isSocialBot(ua);
+  const isInternalProbe = c.req.header('x-internal-probe') === '1' || c.req.header('x-crawler-prewarm') === '1' || c.req.header('x-frontend-secret') === c.env.FRONTEND_API_SECRET;
+  const purposeHeader = (c.req.header('purpose') || c.req.header('sec-purpose') || c.req.header('x-purpose') || c.req.header('x-moz') || '').toLowerCase();
+  const isPrefetch = purposeHeader.includes('prefetch') || purposeHeader.includes('preview') || c.req.query('preview') === '1' || isInternalProbe;
+
+  if (isBot || c.req.query('preview') === '1') {
     const reqUrl = new URL(c.req.url);
     const fullShortUrl = `${reqUrl.protocol}//${reqUrl.host}${reqUrl.pathname}`;
     return socialPreviewPage(link, destination, fullShortUrl);
+  }
+
+  // 5. Fire-and-forget: record click asynchronously for real human visitors ONLY
+  if (!isBot && !isPrefetch && !isInternalProbe) {
+    const clickId   = uid('clk');
+    const timestamp = now();
+    const rawIp     = c.req.header('cf-connecting-ip') ?? c.req.header('x-forwarded-for') ?? '127.0.0.1';
+    const salt      = c.env.HASH_SALT ?? 'lshorter_rgpd_salt_2026';
+    const ipHash    = await sha256(rawIp + salt);
+    const referer   = c.req.header('referer') ?? 'Direct';
+    const resolvedCountry = country && country !== 'XX' ? country : (c.req.header('cf-ipcountry') || 'BF');
+    const city      = cityReq || (resolvedCountry === 'BF' ? 'Ouagadougou' : 'Direct');
+    const linkId = link.id || (link as any).link_id || (link as any).linkId || '';
+    const linkUserId = link.userId || (link as any).user_id || 'usr_anonymous';
+
+    const trackClick = async () => {
+      try {
+        // 1. Update link clicks counter in D1 (strictly capped at max_clicks atomically)
+        const updateRes = await c.env.DB.prepare(
+          `UPDATE links 
+           SET clicks_count = COALESCE(clicks_count, 0) + 1, 
+               unique_clicks = COALESCE(unique_clicks, 0) + 1, 
+               updated_at = ? 
+           WHERE (id = ? OR slug = ?)
+             AND (max_clicks IS NULL OR max_clicks = 0 OR COALESCE(clicks_count, 0) < max_clicks)`
+        ).bind(timestamp, linkId, decodedSlug).run();
+
+        if (updateRes.meta.changes > 0) {
+          // 2. Increment user quota in KV
+          await incrementClickCount(c.env.URL_KV, linkUserId).catch(() => {});
+
+          // 3. Cache individual click in KV
+          await c.env.URL_KV.put(
+            `click:${linkId}:${clickId}`,
+            JSON.stringify({ id: clickId, linkId, userId: linkUserId, country: resolvedCountry, device: device.key, os: device.os, timestamp }),
+            { expirationTtl: 90 * 24 * 3600 }
+          ).catch(() => {});
+
+          // 4. Detailed analytics event in D1
+          await c.env.DB.prepare(
+            `INSERT INTO click_events (id, link_id, user_id, slug, ip_masked, country_code, city, device, browser, os, referrer, resolved_url, timestamp)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+          ).bind(clickId, linkId, linkUserId, decodedSlug, ipHash, resolvedCountry, city, device.type, device.browser, device.os, referer, destination, timestamp).run();
+        }
+      } catch (err) {
+        console.error('[TrackClick Error]', err);
+      }
+    };
+
+    try {
+      await trackClick();
+    } catch (err) {
+      console.error('[TrackClick Error]', err);
+    }
   }
 
   // 6. Link Cloaking — serve iframe instead of redirect
