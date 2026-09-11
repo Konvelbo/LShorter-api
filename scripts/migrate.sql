@@ -28,7 +28,6 @@ CREATE TABLE links (
     og_title TEXT,
     og_description TEXT,
     og_image TEXT,
-    card_format TEXT DEFAULT 'summary_large_image',
     twitter_card TEXT DEFAULT 'summary_large_image',
     hide_referrer BOOLEAN DEFAULT 0,
     tags TEXT,
@@ -41,7 +40,6 @@ CREATE TABLE links (
 );
 
 CREATE INDEX IF NOT EXISTS idx_links_domain_slug ON links(domain_name, slug);
-CREATE INDEX IF NOT EXISTS idx_links_card_format ON links(card_format);
 
 CREATE TABLE IF NOT EXISTS custom_domains (
     id TEXT PRIMARY KEY,

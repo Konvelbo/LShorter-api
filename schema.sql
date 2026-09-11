@@ -60,7 +60,6 @@ CREATE TABLE IF NOT EXISTS links (
     og_title TEXT,
     og_description TEXT,
     og_image TEXT,
-    card_format TEXT DEFAULT 'summary_large_image',
     twitter_card TEXT DEFAULT 'summary_large_image',
     hide_referrer BOOLEAN DEFAULT 0,
     tags TEXT, -- JSON array
@@ -136,6 +135,5 @@ CREATE TABLE IF NOT EXISTS retargeting_pixels (
 
 -- Indexes
 CREATE INDEX IF NOT EXISTS idx_links_domain_slug ON links(domain_name, slug);
-CREATE INDEX IF NOT EXISTS idx_links_card_format ON links(card_format);
 CREATE INDEX IF NOT EXISTS idx_clicks_link_timestamp ON click_events(link_id, timestamp);
 CREATE INDEX IF NOT EXISTS idx_clicks_user_timestamp ON click_events(user_id, timestamp);

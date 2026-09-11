@@ -213,14 +213,11 @@ links.post(
       ogTitle,
       ogDescription,
       ogImage,
-      cardFormat,
-      card_format,
       twitterCard,
       twitter_card,
     } = parsed.data;
 
     const resolvedOgImage = await normalizeOgImage(c.env, ogImage);
-    const finalCardFormat = (cardFormat === "summary" || card_format === "summary" || twitterCard === "summary" || twitter_card === "summary") ? "summary" : "summary_large_image";
 
     // Reserved slugs check
     const RESERVED_SLUGS = new Set([
@@ -401,10 +398,10 @@ links.post(
                (id, user_id, domain_id, domain_name, slug, short_url, target_url,
                 routing_rules, geo_targeting, device_targeting, is_active, expires_at,
                 password_hash, is_password_protected, tags, is_cloaked, hide_referrer, meta_title,
-                og_title, og_description, og_image, card_format, twitter_card,
+                og_title, og_description, og_image, twitter_card,
                 max_clicks, fallback_url, password_plain,
                 created_at, updated_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           )
             .bind(
               linkId,
@@ -428,8 +425,7 @@ links.post(
               ogTitle ?? metaTitle ?? null,
               ogDescription ?? null,
               resolvedOgImage ?? null,
-              finalCardFormat,
-              finalCardFormat,
+              "summary_large_image",
               finalMaxClicks,
               finalFallbackUrl,
               finalPasswordPlain,
@@ -438,7 +434,6 @@ links.post(
             )
             .run();
         } catch (colErr) {
-          // Fallback if column card_format/twitter_card does not exist in D1 yet
           await c.env.DB.prepare(
             `INSERT INTO links
                (id, user_id, domain_id, domain_name, slug, short_url, target_url,
@@ -517,10 +512,8 @@ links.post(
             ogTitle: ogTitle ?? metaTitle ?? null,
             ogDescription: ogDescription ?? null,
             ogImage: resolvedOgImage ?? null,
-            cardFormat: finalCardFormat,
-            card_format: finalCardFormat,
-            twitterCard: finalCardFormat,
-            twitter_card: finalCardFormat,
+            twitterCard: "summary_large_image",
+            twitter_card: "summary_large_image",
             maxClicks: finalMaxClicks,
             max_clicks: finalMaxClicks,
             fallbackUrl: finalFallbackUrl,
@@ -560,10 +553,8 @@ links.post(
           ogTitle: ogTitle ?? metaTitle ?? null,
           ogDescription: ogDescription ?? null,
           ogImage: resolvedOgImage ?? null,
-          cardFormat: finalCardFormat,
-          card_format: finalCardFormat,
-          twitterCard: finalCardFormat,
-          twitter_card: finalCardFormat,
+          twitterCard: "summary_large_image",
+          twitter_card: "summary_large_image",
           qrCode: qrCodeUrl(shortUrl),
           clicks: 0,
           created_at: now(),
@@ -626,8 +617,6 @@ links.patch("/:id", async (c) => {
     ogTitle?: string | null;
     ogDescription?: string | null;
     ogImage?: string | null;
-    cardFormat?: string | null;
-    card_format?: string | null;
     twitterCard?: string | null;
     twitter_card?: string | null;
   };
@@ -697,17 +686,9 @@ links.patch("/:id", async (c) => {
     setParts.push("og_image = ?");
     bindings.push(resolvedImg ?? null);
   }
-  if (
-    updates.cardFormat !== undefined ||
-    updates.card_format !== undefined ||
-    updates.twitterCard !== undefined ||
-    updates.twitter_card !== undefined
-  ) {
-    const cf = (updates.cardFormat === "summary" || updates.card_format === "summary" || updates.twitterCard === "summary" || updates.twitter_card === "summary") ? "summary" : "summary_large_image";
-    setParts.push("card_format = ?");
-    bindings.push(cf);
+  if (updates.twitterCard !== undefined || updates.twitter_card !== undefined) {
     setParts.push("twitter_card = ?");
-    bindings.push(cf);
+    bindings.push("summary_large_image");
   }
   if (
     updates.maxClicks !== undefined ||
@@ -747,12 +728,9 @@ links.patch("/:id", async (c) => {
       .bind(...bindings)
       .run();
   } catch (updateErr) {
-    // If card_format column is missing in D1 table, strip it and retry
-    const filteredSet = setParts.filter(p => !p.includes("card_format") && !p.includes("twitter_card"));
-    // Reconstruct bindings without card_format values
-    const cardIdx1 = setParts.findIndex(p => p.includes("card_format"));
-    const cardIdx2 = setParts.findIndex(p => p.includes("twitter_card"));
-    const filteredBindings = bindings.filter((_, idx) => idx !== cardIdx1 && idx !== cardIdx2);
+    const filteredSet = setParts.filter(p => !p.includes("twitter_card"));
+    const cardIdx = setParts.findIndex(p => p.includes("twitter_card"));
+    const filteredBindings = bindings.filter((_, idx) => idx !== cardIdx);
     await c.env.DB.prepare(`UPDATE links SET ${filteredSet.join(", ")} WHERE id = ?`)
       .bind(...filteredBindings)
       .run();
@@ -768,7 +746,6 @@ links.patch("/:id", async (c) => {
   if (updated) {
     const finalDomain = updated.domain_name || existing.domain_name;
     const finalSlug = updated.slug || existing.slug;
-    const finalCard = updated.card_format || updated.twitter_card || updates.cardFormat || updates.card_format || "summary_large_image";
     // Cache updated link
     await c.env.URL_KV.put(
       `link:${finalDomain}:${finalSlug}`,
@@ -792,10 +769,8 @@ links.patch("/:id", async (c) => {
         ogTitle: updated.og_title || updated.meta_title || null,
         ogDescription: updated.og_description || null,
         ogImage: updated.og_image || null,
-        cardFormat: finalCard,
-        card_format: finalCard,
-        twitterCard: finalCard,
-        twitter_card: finalCard,
+        twitterCard: "summary_large_image",
+        twitter_card: "summary_large_image",
         maxClicks: updated.max_clicks !== null && updated.max_clicks !== undefined ? Number(updated.max_clicks) : null,
         max_clicks: updated.max_clicks !== null && updated.max_clicks !== undefined ? Number(updated.max_clicks) : null,
         fallbackUrl: updated.fallback_url || null,
@@ -807,10 +782,8 @@ links.patch("/:id", async (c) => {
 
   return ok({
     ...updated,
-    cardFormat: updated?.card_format || updated?.twitter_card || updates.cardFormat || updates.card_format || "summary_large_image",
-    card_format: updated?.card_format || updated?.twitter_card || updates.cardFormat || updates.card_format || "summary_large_image",
-    twitterCard: updated?.card_format || updated?.twitter_card || updates.cardFormat || updates.card_format || "summary_large_image",
-    twitter_card: updated?.card_format || updated?.twitter_card || updates.cardFormat || updates.card_format || "summary_large_image",
+    twitterCard: "summary_large_image",
+    twitter_card: "summary_large_image",
   });
 });
 
@@ -834,7 +807,7 @@ links.get("/", async (c) => {
       `SELECT id, domain_name, slug, target_url, clicks_count,
               geo_targeting, device_targeting, routing_rules, is_active, expires_at,
               tags, is_cloaked, hide_referrer, meta_title,
-              og_title, og_description, og_image, card_format, twitter_card,
+              og_title, og_description, og_image, twitter_card,
               max_clicks, fallback_url, password_plain,
               (CASE WHEN password_hash IS NOT NULL OR password_plain IS NOT NULL THEN 1 ELSE 0 END) as has_password,
               created_at
@@ -846,7 +819,6 @@ links.get("/", async (c) => {
       .all();
     results = res.results || [];
   } catch {
-    // Fallback if card_format is not in table yet
     const res = await c.env.DB.prepare(
       `SELECT id, domain_name, slug, target_url, clicks_count,
               geo_targeting, device_targeting, routing_rules, is_active, expires_at,
@@ -874,7 +846,6 @@ links.get("/", async (c) => {
     success: true,
     data: results.map((r: unknown) => {
       const row = r as Record<string, unknown>;
-      const effectiveCard = (row.card_format || row.twitter_card || "summary_large_image") as string;
       return {
         ...row,
         password: row.password_plain || null,
@@ -901,10 +872,8 @@ links.get("/", async (c) => {
         ogTitle: row.og_title,
         ogDescription: row.og_description,
         ogImage: row.og_image,
-        cardFormat: effectiveCard,
-        card_format: effectiveCard,
-        twitterCard: effectiveCard,
-        twitter_card: effectiveCard,
+        twitterCard: "summary_large_image",
+        twitter_card: "summary_large_image",
         shortUrl: `https://${row.domain_name || "lsho.cc"}/${row.slug}`,
       };
     }),
@@ -926,7 +895,6 @@ links.get("/:id", async (c) => {
   if (link["user_id"] !== userId) return err("Forbidden", 403, "FORBIDDEN");
 
   const shortUrl = `https://${link["domain_name"] || "lsho.cc"}/${link["slug"]}`;
-  const effectiveCard = (link["card_format"] || link["twitter_card"] || "summary_large_image") as string;
 
   return ok({
     ...link,
@@ -940,10 +908,8 @@ links.get("/:id", async (c) => {
     device_targeting: link["device_targeting"]
       ? JSON.parse(link["device_targeting"] as string)
       : null,
-    cardFormat: effectiveCard,
-    card_format: effectiveCard,
-    twitterCard: effectiveCard,
-    twitter_card: effectiveCard,
+    twitterCard: "summary_large_image",
+    twitter_card: "summary_large_image",
     has_password: !!link["password_hash"],
     password_hash: undefined, // never expose the hash
     shortUrl,

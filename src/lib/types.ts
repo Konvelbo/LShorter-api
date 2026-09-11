@@ -81,8 +81,6 @@ export interface CachedLink {
   ogTitle?: string | null;
   ogDescription?: string | null;
   ogImage?: string | null;
-  cardFormat?: string | null;
-  card_format?: string | null;
   twitterCard?: string | null;
   twitter_card?: string | null;
   routingRules: any[] | null;
@@ -112,9 +110,7 @@ export interface LinkRow {
   og_title?: string | null;
   og_description?: string | null;
   og_image?: string | null;
-  card_format?: string | null;
   twitter_card?: string | null;
-  cardFormat?: string | null;
   twitterCard?: string | null;
   hide_referrer: number;
   tags: string | null;

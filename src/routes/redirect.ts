@@ -23,8 +23,6 @@ interface CachedLink {
   ogTitle?:        string | null;
   ogDescription?:  string | null;
   ogImage?:        string | null;
-  cardFormat?:     string | null;
-  card_format?:    string | null;
   twitterCard?:    string | null;
   twitter_card?:   string | null;
   maxClicks?:      number | null;
@@ -71,7 +69,6 @@ function socialPreviewPage(link: CachedLink, destination: string, shortUrl: stri
   const title = link.ogTitle || link.metaTitle || 'LShorter — Redirection Sécurisée';
   const description = link.ogDescription || 'Redirection instantanée optimisée par le réseau Edge mondial LShorter.';
   const image = link.ogImage || '';
-  const cardFormat = (link.cardFormat === 'summary' || link.card_format === 'summary' || link.twitterCard === 'summary' || link.twitter_card === 'summary') ? 'summary' : 'summary_large_image';
 
   const html = `<!DOCTYPE html>
 <html lang="fr" prefix="og: https://ogp.me/ns#">
@@ -91,12 +88,12 @@ function socialPreviewPage(link: CachedLink, destination: string, shortUrl: stri
   ${image ? `<meta property="og:image" content="${escapeHtml(image)}">` : ''}
   ${image ? `<meta property="og:image:url" content="${escapeHtml(image)}">` : ''}
   ${image ? `<meta property="og:image:secure_url" content="${escapeHtml(image)}">` : ''}
-  ${image ? `<meta property="og:image:width" content="${cardFormat === 'summary' ? '300' : '1200'}">` : ''}
-  ${image ? `<meta property="og:image:height" content="${cardFormat === 'summary' ? '300' : '630'}">` : ''}
+  ${image ? `<meta property="og:image:width" content="1200">` : ''}
+  ${image ? `<meta property="og:image:height" content="630">` : ''}
   ${image ? `<meta property="og:image:alt" content="${escapeHtml(title)}">` : ''}
 
   <!-- Twitter / X Cards -->
-  <meta name="twitter:card" content="${cardFormat}">
+  <meta name="twitter:card" content="summary_large_image">
   <meta name="twitter:url" content="${escapeHtml(shortUrl)}">
   <meta name="twitter:title" content="${escapeHtml(title)}">
   <meta name="twitter:description" content="${escapeHtml(description)}">
@@ -229,7 +226,7 @@ async function handleRedirect(
       row = await c.env.DB.prepare(
         `SELECT id, user_id, target_url, routing_rules, geo_targeting, device_targeting,
                 is_active, expires_at, password_hash, is_cloaked, hide_referrer, meta_title,
-                og_title, og_description, og_image, card_format, twitter_card, clicks_count, max_clicks, fallback_url
+                og_title, og_description, og_image, twitter_card, clicks_count, max_clicks, fallback_url
          FROM links
          WHERE (slug = ? OR slug = ? OR slug = ? OR LOWER(slug) = LOWER(?) OR LOWER(slug) = LOWER(?))
          ORDER BY created_at DESC
@@ -251,8 +248,6 @@ async function handleRedirect(
     if (row.is_active === 0) return c.text('This link has been paused.', 403);
     if (row.expires_at && new Date(row.expires_at) < new Date()) return c.text('This link has expired.', 410);
 
-    const effectiveCard = (row.card_format || row.twitter_card || 'summary_large_image') as string;
-
     link = {
       id:              row.id,
       userId:          row.user_id,
@@ -267,10 +262,8 @@ async function handleRedirect(
       ogTitle:         row.og_title,
       ogDescription:   row.og_description,
       ogImage:         row.og_image,
-      cardFormat:      effectiveCard,
-      card_format:     effectiveCard,
-      twitterCard:     effectiveCard,
-      twitter_card:    effectiveCard,
+      twitterCard:     "summary_large_image",
+      twitter_card:    "summary_large_image",
       maxClicks:       row.max_clicks,
       max_clicks:      row.max_clicks,
       fallbackUrl:     row.fallback_url,
