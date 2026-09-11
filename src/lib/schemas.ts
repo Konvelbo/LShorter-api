@@ -66,6 +66,10 @@ export const CreateLinkSchema = z.object({
   ogTitle:         z.string().max(160).optional().nullable(),         // OpenGraph title for social networks
   ogDescription:   z.string().max(300).optional().nullable(),         // OpenGraph description
   ogImage:         z.string().optional().nullable(),                  // OpenGraph banner image URL or data URI
+  cardFormat:      z.string().optional().nullable(),                  // 'summary_large_image' | 'summary'
+  card_format:     z.string().optional().nullable(),
+  twitterCard:     z.string().optional().nullable(),
+  twitter_card:    z.string().optional().nullable(),
   qrCodeConfig:    z.any().optional().nullable(),
   routingRules:    z.any().optional().nullable(),
   userId:          z.string().optional().nullable(),
@@ -96,6 +100,10 @@ export const UpdateLinkSchema = z.object({
   ogTitle:         z.string().max(160).optional().nullable(),
   ogDescription:   z.string().max(300).optional().nullable(),
   ogImage:         z.string().optional().nullable(),
+  cardFormat:      z.string().optional().nullable(),
+  card_format:     z.string().optional().nullable(),
+  twitterCard:     z.string().optional().nullable(),
+  twitter_card:    z.string().optional().nullable(),
   maxClicks:       z.any().optional().nullable(),
   max_clicks:      z.any().optional().nullable(),
   fallbackUrl:     z.string().optional().nullable(),
