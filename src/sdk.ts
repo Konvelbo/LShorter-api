@@ -401,25 +401,23 @@ class UsersModule {
 // ─── Main SDK Class ───────────────────────────────────────────────────────────
 
 /**
- * QuickLink SDK
+ * LShorter SDK Client
  *
  * @example
- * const qk = new QuickLink({ apiKey: 'sk_live_...' });
+ * const lsh = new LShorter({ apiKey: 'lsh_live_...' });
  *
  * // Create a link
- * const { shortUrl, qrCode } = await qk.links.create({
+ * const link = await lsh.links.create({
  *   targetUrl: 'https://example.com/product',
- *   geoTargeting: { FR: 'https://example.fr', US: 'https://example.com' },
  * });
  *
  * // Track conversion
- * await qk.track.conversion({
+ * await lsh.track.conversion({
  *   eventName: 'purchase', amount: 49, currency: 'EUR',
- *   customer: { id: 'usr_123' },
  *   linkId: 'link_abc123',
  * });
  */
-export class QuickLink {
+export class LShorter {
   public readonly links:     LinksModule;
   public readonly track:     TrackModule;
   public readonly analytics: AnalyticsModule;
@@ -438,9 +436,12 @@ export class QuickLink {
   }
 }
 
+// Alias for backward compatibility
+export const QuickLink = LShorter;
+
 // Re-export error class for instanceof checks in consumer code
-export { QuickLinkError };
+export { QuickLinkError, QuickLinkError as LShorterError };
 
 // ─── Default export ───────────────────────────────────────────────────────────
 
-export default QuickLink;
+export default LShorter;

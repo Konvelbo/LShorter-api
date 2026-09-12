@@ -282,7 +282,7 @@ links.post(
       return err("Invalid target URL format", 400, "INVALID_URL");
     }
 
-    // Plan constraints check for targeting rules
+    // Plan constraints check for targeting rules — FORBIDDEN on FREEMIUM
     const activeGeoRules = Object.values(geoTargeting ?? {}).filter(
       Boolean,
     ).length;
@@ -290,13 +290,13 @@ links.post(
       Boolean,
     ).length;
     const activeRoutingRules = (routingRules ?? []).filter((r: any) =>
-      r?.destinationUrl?.trim?.(),
+      r?.destinationUrl?.trim?.() || r?.url?.trim?.(),
     ).length;
     const totalRules = activeRoutingRules + activeGeoRules + activeDeviceRules;
 
-    if (plan === "FREEMIUM" && totalRules > 2) {
+    if (plan === "FREEMIUM" && totalRules > 0) {
       return err(
-        "Freemium plan is limited to max 2 targeting rules per link. Upgrade your plan.",
+        "Smart routing and targeting rules (Geo, Device, Dynamic routing) are not available on the Freemium plan. Upgrade to PRO.",
         403,
         "PLAN_UPGRADE_REQUIRED",
       );
@@ -567,7 +567,7 @@ links.post(
 
 // ─── PATCH /api/v1/links/:id  (update destination URL + other fields) ──────────
 links.patch("/:id", async (c) => {
-  const { userId } = c.get("auth");
+  const { userId, plan } = c.get("auth");
   const id = c.req.param("id");
 
   const existing = await c.env.DB.prepare(
@@ -620,6 +620,28 @@ links.patch("/:id", async (c) => {
     twitterCard?: string | null;
     twitter_card?: string | null;
   };
+
+  // Plan constraint: routing rules forbidden on FREEMIUM
+  if (plan === "FREEMIUM") {
+    const hasGeo =
+      updates.geoTargeting &&
+      Object.values(updates.geoTargeting).filter(Boolean).length > 0;
+    const hasDevice =
+      updates.deviceTargeting &&
+      Object.values(updates.deviceTargeting).filter(Boolean).length > 0;
+    const hasRouting =
+      updates.routingRules &&
+      updates.routingRules.filter(
+        (r: any) => r?.destinationUrl?.trim?.() || r?.url?.trim?.(),
+      ).length > 0;
+    if (hasGeo || hasDevice || hasRouting) {
+      return err(
+        "Smart routing and targeting rules (Geo, Device, Dynamic routing) are not available on the Freemium plan. Upgrade to PRO.",
+        403,
+        "PLAN_UPGRADE_REQUIRED",
+      );
+    }
+  }
   const setParts: string[] = ["updated_at = ?"];
   const bindings: unknown[] = [now()];
 

@@ -1,78 +1,152 @@
-# QuickLink API
+# LShorter — Official TypeScript / JavaScript SDK
 
-QuickLink is an Edge-native link management and tracking backend built on Cloudflare Workers, Hono, D1, and KV. It provides lightning-fast URL redirection, powerful targeting (Geo & Device), and deep analytics directly at the Edge.
+> **LShorter** est une plateforme moderne et ultra-rapide de raccourcissement de liens, de redirection intelligente à l'Edge (Cloudflare Workers) et de suivi avancé des conversions.
 
-## Features
+🌐 **Site officiel :** [https://lsho.cc](https://lsho.cc)  
+👤 **Créé par :** **KONVELBO Samuel**
 
-- **Blazing Fast Redirection**: Uses Cloudflare KV for sub-millisecond edge lookups.
-- **Advanced Targeting**: Redirect users based on their Country (Geo) or Device (iOS, Android, Windows, macOS).
-- **Asynchronous Click Tracking**: Fire-and-forget click logging to D1 with zero impact on user redirection latency.
-- **Custom Domains**: Built-in support for Cloudflare SSL for SaaS. Bring your own domains.
-- **Analytics & Conversion Tracking**: Native tracking for conversions and click stats.
-- **Type-Safe**: 100% written in TypeScript with Zod validation.
+---
 
-## Tech Stack
+## 📌 À quoi sert l'API LShorter ?
 
-- **Framework**: [Hono.js](https://hono.dev)
-- **Runtime**: [Cloudflare Workers](https://workers.cloudflare.com)
-- **Database**: [Cloudflare D1](https://developers.cloudflare.com/d1/) (SQLite at the edge)
-- **Cache**: [Cloudflare Workers KV](https://developers.cloudflare.com/kv/)
-- **Validation**: [Zod](https://zod.dev)
-- **Testing**: [Vitest](https://vitest.dev) + `@cloudflare/vitest-pool-workers`
+L'API et le SDK **LShorter** permettent aux développeurs et aux entreprises d'intégrer facilement un moteur de liens courts performant directement dans leurs applications :
 
-## Getting Started
+- ⚡ **Redirections Edge ultra-rapides (< 15ms)** propulsées par le réseau mondial Cloudflare.
+- 🎯 **Ciblage & Routage intelligent** : Redirigez vos utilisateurs selon leur pays (Géo-ciblage) ou leur appareil (iOS, Android, Windows, Mac).
+- 🔒 **Sécurité & Liens Protégés** : Protection de liens par mot de passe, expiration automatique et masquage d'URL (*cloaking*).
+- 📊 **Analytics & Tracking de conversions** : Mesurez le nombre de clics, les pays, les navigateurs et suivez le chiffre d'affaires / conversions générés par chaque lien.
+- 🏷️ **Domaines Personnalisés** : Connectez vos propres noms de domaine de marque facilement.
 
-### Prerequisites
+---
 
-- Node.js 18+
-- `pnpm` installed
-- Cloudflare account with Workers, KV, and D1 enabled.
+## 📦 Installation
 
-### Installation
-
-1. Clone the repository and install dependencies:
-   ```bash
-   pnpm install
-   ```
-
-2. Create a KV namespace and D1 Database via wrangler:
-   ```bash
-   wrangler kv namespace create URL_KV
-   wrangler d1 create quicklink-db
-   ```
-   *Note: Update the IDs in your `wrangler.jsonc` file.*
-
-3. Run migrations locally:
-   ```bash
-   pnpm run db:migrate:local
-   ```
-
-4. Start the local development server:
-   ```bash
-   pnpm run dev
-   ```
-
-## Testing
-
-The API uses `vitest` to run isolated tests within Miniflare (Cloudflare's local simulator).
+Installez le SDK avec votre gestionnaire de paquets préféré :
 
 ```bash
-pnpm run test
+# Avec pnpm (Recommandé)
+pnpm add lshorter-api
+
+# Avec npm
+npm install lshorter-api
+
+# Avec yarn
+yarn add lshorter-api
+
+# Avec bun
+bun add lshorter-api
 ```
 
-## Deployment
+---
 
-To deploy to your Cloudflare account:
+## 🚀 Démarrage Rapide
 
-1. Apply the production database migrations:
-   ```bash
-   pnpm run db:migrate
-   ```
-2. Deploy the worker:
-   ```bash
-   pnpm run deploy
-   ```
+### 1. Initialiser le client
 
-## License
+Obtenez votre clé API sur votre tableau de bord sur [https://lsho.cc](https://lsho.cc).
 
-This project is licensed under the MIT License.
+```typescript
+import { LShorter } from "lshorter-api";
+
+const lsh = new LShorter({
+  apiKey: "lsh_live_xxxxxxxxxxxxxxxxxxxxxxxxxx",
+  // Optionnel : baseUrl par défaut sur https://lsho.cc
+  baseUrl: "https://lsho.cc",
+});
+```
+
+---
+
+### 2. Créer un lien court
+
+```typescript
+// Création d'un lien simple
+const link = await lsh.links.create({
+  targetUrl: "https://mon-site.com/produit-promo",
+  slug: "promo-ete", // Optionnel : slug personnalisé (lsho.cc/promo-ete)
+});
+
+console.log("Lien court :", link.shortUrl);
+console.log("QR Code :", link.qrCode);
+```
+
+---
+
+### 3. Créer un lien avec ciblage intelligent (Plan PRO)
+
+```typescript
+const smartLink = await lsh.links.create({
+  targetUrl: "https://mon-site.com/default",
+  slug: "app-download",
+  // Rediriger les utilisateurs selon leur appareil
+  deviceTargeting: {
+    ios: "https://apps.apple.com/app/id123456789",
+    android: "https://play.google.com/store/apps/details?id=com.app",
+  },
+  // Rediriger selon le pays
+  geoTargeting: {
+    FR: "https://mon-site.com/fr",
+    US: "https://mon-site.com/en",
+  },
+});
+```
+
+---
+
+### 4. Suivre une conversion (E-commerce / Inscription)
+
+Attribuez vos ventes et vos leads à vos liens raccourcis :
+
+```typescript
+await lsh.track.conversion({
+  eventName: "purchase",
+  amount: 49.99,
+  currency: "EUR",
+  linkId: link.id,
+  customer: {
+    id: "usr_123",
+    email: "client@example.com",
+    name: "Jean Dupont",
+  },
+});
+```
+
+---
+
+### 5. Consulter les statistiques d'un lien
+
+```typescript
+const stats = await lsh.analytics.get({
+  linkId: link.id,
+  period: "30d", // "1d" | "7d" | "30d" | "90d" | "365d"
+});
+
+console.log(`Total de clics : ${stats.totalClicks}`);
+console.log("Top Pays :", stats.topCountries);
+console.log("Top Appareils :", stats.topDevices);
+```
+
+---
+
+## 🛠️ Méthodes Disponibles dans le SDK
+
+| Module | Méthode | Description |
+| :--- | :--- | :--- |
+| `lsh.links` | `.create(options)` | Créer un nouveau lien court |
+| `lsh.links` | `.list(options)` | Lister ses liens avec pagination |
+| `lsh.links` | `.get(id)` | Récupérer les détails d'un lien |
+| `lsh.links` | `.update(id, options)` | Modifier l'URL cible, tags ou règles |
+| `lsh.links` | `.delete(id)` | Supprimer un lien et purger le cache Edge |
+| `lsh.track` | `.conversion(event)` | Enregistrer une conversion liée à un lien |
+| `lsh.analytics` | `.get(options)` | Consulter les métriques de trafic |
+| `lsh.domains` | `.list()` | Lister ses domaines personnalisés |
+| `lsh.domains` | `.add(domain)` | Ajouter un domaine personnalisé |
+| `lsh.domains` | `.verify(id)` | Vérifier la configuration DNS d'un domaine |
+
+---
+
+## 👨‍💻 Auteur & Support
+
+- **Développé par :** **KONVELBO Samuel**
+- **Plateforme Officielle :** [https://lsho.cc](https://lsho.cc)
+- **Licence :** MIT

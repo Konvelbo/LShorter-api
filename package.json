@@ -1,8 +1,36 @@
 {
   "name": "lshorter-api",
-  "version": "2.0.0",
+  "version": "2.0.2",
+  "description": "Official TypeScript / JavaScript SDK for LShorter Edge URL Shortener & Analytics",
+  "author": "KONVELBO Samuel",
+  "homepage": "https://lsho.cc",
+  "license": "MIT",
+  "keywords": [
+    "lshorter",
+    "url-shortener",
+    "short-link",
+    "edge-redirect",
+    "analytics",
+    "conversion-tracking"
+  ],
   "type": "module",
+  "main": "./dist/sdk.cjs",
+  "module": "./dist/sdk.js",
+  "types": "./dist/sdk.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/sdk.d.ts",
+      "import": "./dist/sdk.js",
+      "require": "./dist/sdk.cjs"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
   "scripts": {
+    "build:sdk": "tsup src/sdk.ts --format cjs,esm --dts --clean",
+    "prepublishOnly": "pnpm run build:sdk",
     "dev": "wrangler dev",
     "deploy": "wrangler deploy --minify",
     "typecheck": "tsc --noEmit",
@@ -16,8 +44,9 @@
     "zod": "^3.24.1"
   },
   "devDependencies": {
-    "@cloudflare/workers-types": "^4.20250718.0",
     "@cloudflare/vitest-pool-workers": "^0.8.6",
+    "@cloudflare/workers-types": "^4.20250718.0",
+    "tsup": "^8.5.1",
     "typescript": "^5.8.3",
     "vitest": "^3.0.0",
     "wrangler": "^4.110.0"
