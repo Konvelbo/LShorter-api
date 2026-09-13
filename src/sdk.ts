@@ -70,17 +70,31 @@ export interface PaginatedResponse<T> {
 // ── Conversions ────────────────────────────────────────────────────────────────
 
 export interface CustomerInput {
-  /** Required: your internal customer / user ID */
-  id: string;
+  /** Internal customer / user ID */
+  id?: string;
+  /** Customer email address */
+  email?: string;
+  /** Customer display name or FullName */
+  name?: string;
+  fullName?: string;
+  /** Customer avatar / profile image URL */
+  avatarUrl?: string;
+  avatar?: string;
 }
 
 export interface TrackConversionOptions {
-  eventName:  string;
-  amount?:    number;
-  currency?:  string;
-  customer:   CustomerInput;
-  linkId:     string;
-  clickId?:   string | null;
+  eventName:         string;
+  amount?:           number;
+  currency?:         string;
+  customer?:         CustomerInput;
+  customerId?:       string;
+  customerEmail?:    string;
+  customerName?:     string;
+  customerFullName?: string;
+  customerAvatar?:   string;
+  avatarUrl?:        string;
+  linkId:            string;
+  clickId?:          string | null;
 }
 
 export interface ConversionResponse {
@@ -88,7 +102,11 @@ export interface ConversionResponse {
   eventName:         string;
   amount:            number;
   currency:          string;
-  customerId:        string;
+  customerId?:       string;
+  customerEmail?:    string;
+  customerName?:     string;
+  customerAvatar?:   string;
+  avatarUrl?:        string;
   linkId:            string;
   clickId:           string | null;
   plan:              Plan;
@@ -311,12 +329,15 @@ class TrackModule {
   conversion(options: TrackConversionOptions): Promise<ConversionResponse> {
     // Map SDK-friendly `customer` object → flat API payload
     const payload = {
-      eventName:     options.eventName,
-      amount:        options.amount  ?? 0,
-      currency:      options.currency ?? 'EUR',
-      customerId:    options.customer.id,
-      linkId:        options.linkId,
-      clickId:       options.clickId ?? null,
+      eventName:        options.eventName,
+      amount:           options.amount   ?? 0,
+      currency:         options.currency ?? 'EUR',
+      customerId:       options.customerId || options.customer?.id || 'usr_anon',
+      customerEmail:    options.customerEmail || options.customer?.email,
+      customerName:     options.customerName || options.customerFullName || options.customer?.name || options.customer?.fullName,
+      customerAvatar:   options.customerAvatar || options.avatarUrl || options.customer?.avatarUrl || options.customer?.avatar,
+      linkId:           options.linkId,
+      clickId:          options.clickId  ?? null,
     };
 
     return this.http.post<ConversionResponse>('/api/v1/track', payload);

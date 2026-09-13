@@ -93,23 +93,28 @@ const smartLink = await lsh.links.create({
 
 ---
 
-### 4. Suivre une conversion (E-commerce / Inscription)
+### 4. Suivre une conversion & Attribution Financière (E-commerce / Inscription / Vente)
 
-Attribuez vos ventes et vos leads à vos liens raccourcis :
+Attribuez vos ventes, vos inscriptions et vos montants financiers à vos liens raccourcis. L'API et le SDK acceptent les informations complètes du client (Avatar, Nom complet, Email) qui seront automatiquement affichées dans la sous-page d'analyse des revenus du dashboard :
 
 ```typescript
 await lsh.track.conversion({
   eventName: "purchase",
-  amount: 49.99,
+  amount: 49.99, // Montant réel en euros perçu lors du paiement
   currency: "EUR",
-  linkId: link.id,
+  linkId: link.id, // Ou slug du lien (ex: 'promo-ete')
+  clickId: "clk_9921ab01", // Optionnel : ID du clic capturé lors de la visite
   customer: {
     id: "usr_123",
     email: "client@example.com",
     name: "Jean Dupont",
+    fullName: "Jean Dupont",
+    avatarUrl: "https://example.com/avatars/jean.jpg", // Photo de profil du client
   },
 });
 ```
+
+> 💡 **Remarque :** L'avatar fourni lors de la conversion est stocké dans la base de données Cloudflare D1 et s'affiche instantanément à l'extrême gauche de la liste des bénéficiaires sur la page d'analyse des revenus de LShorter.
 
 ---
 

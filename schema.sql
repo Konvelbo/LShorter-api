@@ -87,9 +87,30 @@ CREATE TABLE IF NOT EXISTS click_events (
     referrer TEXT,
     resolved_url TEXT NOT NULL,
     is_unique BOOLEAN DEFAULT 1,
+    customer_email TEXT,
+    customer_name TEXT,
+    customer_avatar TEXT,
     conversion_amount REAL DEFAULT 0.0,
     timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY(link_id) REFERENCES links(id) ON DELETE CASCADE
+);
+
+-- 4b. Table Conversions & Achats
+CREATE TABLE IF NOT EXISTS conversions (
+    id TEXT PRIMARY KEY,
+    link_id TEXT NOT NULL,
+    user_id TEXT NOT NULL,
+    event_name TEXT NOT NULL,
+    amount REAL DEFAULT 0.0,
+    currency TEXT DEFAULT 'EUR',
+    customer_id TEXT,
+    customer_email TEXT,
+    customer_name TEXT,
+    customer_avatar TEXT,
+    click_id TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(link_id) REFERENCES links(id) ON DELETE CASCADE,
+    FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
 );
 
 -- 5. Table Clés API Développeurs

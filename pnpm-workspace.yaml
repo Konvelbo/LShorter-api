@@ -1,7 +1,8 @@
-allowBuilds:
+﻿allowBuilds:
+  '@parcel/watcher': true
   esbuild: true
   sharp: true
-  unrs-resolver: set this to true or false
+  unrs-resolver: true
   workerd: true
 minimumReleaseAgeExclude:
   - hono@4.12.32

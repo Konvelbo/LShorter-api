@@ -1,6 +1,6 @@
 {
   "name": "lshorter-api",
-  "version": "2.0.3",
+  "version": "2.0.4",
   "description": "Official TypeScript / JavaScript SDK for LShorter Edge URL Shortener & Analytics",
   "author": "KONVELBO Samuel",
   "homepage": "https://lsho.cc",
@@ -37,7 +37,8 @@
     "cf-typegen": "wrangler types --env-interface CloudflareBindings",
     "db:migrate": "wrangler d1 execute quicklink-db --remote --file=./schema.sql",
     "db:migrate:local": "wrangler d1 execute quicklink-db --local --file=./schema.sql",
-    "db:incremental": "wrangler d1 execute quicklink-db --remote --file=./scripts/migrate.sql"
+    "db:incremental": "wrangler d1 execute quicklink-db --remote --file=./scripts/migrate.sql",
+    "test": "node ./node_modules/jest/bin/jest.js --config jest.config.cjs"
   },
   "dependencies": {
     "hono": "^4.12.32",
@@ -46,6 +47,9 @@
   "devDependencies": {
     "@cloudflare/vitest-pool-workers": "^0.8.6",
     "@cloudflare/workers-types": "^4.20250718.0",
+    "@types/jest": "^30.0.0",
+    "jest": "^30.5.1",
+    "ts-jest": "^29.4.12",
     "tsup": "^8.5.1",
     "typescript": "^5.8.3",
     "vitest": "^3.0.0",
@@ -55,7 +59,9 @@
     "onlyBuiltDependencies": [
       "esbuild",
       "sharp",
-      "workerd"
+      "workerd",
+      "@parcel/watcher",
+      "unrs-resolver"
     ]
   }
 }
