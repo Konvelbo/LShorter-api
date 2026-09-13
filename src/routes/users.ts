@@ -96,21 +96,111 @@ users.get("/me", authMiddleware, async (c) => {
   const { userId } = c.get("auth");
 
   const row = await c.env.DB.prepare(
-    `SELECT id, email, name, plan, created_at, updated_at FROM users WHERE id = ?`,
+    `SELECT id, email, name, avatar_url, plan, clicks_this_month, clicks_limit, domains_limit, links_limit, language, timezone, created_at, updated_at FROM users WHERE id = ?`,
   )
     .bind(userId)
-    .first();
+    .first<any>();
 
   if (!row) return err("User not found", 404, "NOT_FOUND");
-  return ok(row);
+
+  const [linksCountRow, domainsCountRow] = await Promise.all([
+    c.env.DB.prepare(`SELECT COUNT(*) as count FROM links WHERE user_id = ?`).bind(userId).first<{ count: number }>().catch(() => ({ count: 0 })),
+    c.env.DB.prepare(`SELECT COUNT(*) as count FROM custom_domains WHERE user_id = ?`).bind(userId).first<{ count: number }>().catch(() => ({ count: 0 })),
+  ]);
+
+  return ok({
+    id: row.id,
+    email: row.email,
+    name: row.name,
+    fullName: row.name,
+    avatarUrl: row.avatar_url,
+    avatar_url: row.avatar_url,
+    plan: row.plan,
+    clicksThisMonth: row.clicks_this_month ?? 0,
+    clicks_this_month: row.clicks_this_month ?? 0,
+    clicksLimit: row.clicks_limit,
+    clicks_limit: row.clicks_limit,
+    domainsLimit: row.domains_limit,
+    domains_limit: row.domains_limit,
+    linksLimit: row.links_limit,
+    links_limit: row.links_limit,
+    linksCount: linksCountRow?.count ?? 0,
+    domainsCount: domainsCountRow?.count ?? 0,
+    language: row.language || 'fr',
+    timezone: row.timezone || 'Europe/Paris',
+    createdAt: row.created_at,
+    created_at: row.created_at,
+    updatedAt: row.updated_at,
+    updated_at: row.updated_at,
+  });
 });
 
-// ─── PATCH /api/v1/users/:userId  (update plan/name) ─────────────
+// ─── Schema for Updating User Profile ─────────────────────────────────────────
 const UpdateUserSchema = z.object({
   plan: z.enum(["FREEMIUM", "PRO", "BUSINESS", "STARTER", "ENTERPRISE"]).optional(),
   name: z.string().min(1).max(120).optional(),
+  fullName: z.string().min(1).max(120).optional(),
+  avatarUrl: z.string().url().optional().nullable(),
+  avatar_url: z.string().url().optional().nullable(),
+  language: z.string().max(10).optional(),
+  timezone: z.string().max(50).optional(),
 });
 
+// ─── PATCH /api/v1/users/me (update own profile) ──────────────────────────────
+users.patch("/me", authMiddleware, async (c) => {
+  const { userId } = c.get("auth");
+
+  let body: unknown;
+  try { body = await c.req.json(); } catch { return err("Invalid JSON body", 400); }
+
+  const parsed = UpdateUserSchema.safeParse(body);
+  if (!parsed.success) {
+    return err(parsed.error.issues.map((i) => i.message).join(", "), 422, "VALIDATION_ERROR");
+  }
+
+  const { name, fullName, avatarUrl, avatar_url, language, timezone } = parsed.data;
+  const newName = name ?? fullName;
+  const newAvatar = avatarUrl ?? avatar_url;
+
+  if (newName === undefined && newAvatar === undefined && language === undefined && timezone === undefined) {
+    return err("Nothing to update", 400, "EMPTY_UPDATE");
+  }
+
+  const setParts: string[] = ["updated_at = ?"];
+  const bindings: (string | null)[] = [now()];
+
+  if (newName !== undefined) { setParts.push("name = ?"); bindings.push(newName); }
+  if (newAvatar !== undefined) { setParts.push("avatar_url = ?"); bindings.push(newAvatar); }
+  if (language !== undefined) { setParts.push("language = ?"); bindings.push(language); }
+  if (timezone !== undefined) { setParts.push("timezone = ?"); bindings.push(timezone); }
+  bindings.push(userId);
+
+  await c.env.DB.prepare(
+    `UPDATE users SET ${setParts.join(", ")} WHERE id = ?`
+  ).bind(...bindings).run();
+
+  const updated = await c.env.DB.prepare(
+    `SELECT id, email, name, avatar_url, plan, clicks_this_month, clicks_limit, domains_limit, links_limit, language, timezone, created_at, updated_at FROM users WHERE id = ?`
+  ).bind(userId).first<any>();
+
+  return ok({
+    id: updated.id,
+    email: updated.email,
+    name: updated.name,
+    fullName: updated.name,
+    avatarUrl: updated.avatar_url,
+    avatar_url: updated.avatar_url,
+    plan: updated.plan,
+    language: updated.language,
+    timezone: updated.timezone,
+    createdAt: updated.created_at,
+    created_at: updated.created_at,
+    updatedAt: updated.updated_at,
+    updated_at: updated.updated_at,
+  });
+});
+
+// ─── PATCH /api/v1/users/:userId  (update plan/name by ID) ────────────────────
 users.patch("/:userId", authMiddleware, async (c) => {
   const targetUserId = c.req.param("userId");
   const { userId: callerId } = c.get("auth");
@@ -134,8 +224,13 @@ users.patch("/:userId", authMiddleware, async (c) => {
     return err(parsed.error.issues.map((i) => i.message).join(", "), 422, "VALIDATION_ERROR");
   }
 
-  const { plan, name } = parsed.data;
-  if (!plan && !name) return err("Nothing to update", 400, "EMPTY_UPDATE");
+  const { plan, name, fullName, avatarUrl, avatar_url, language, timezone } = parsed.data;
+  const newName = name ?? fullName;
+  const newAvatar = avatarUrl ?? avatar_url;
+
+  if (!plan && newName === undefined && newAvatar === undefined && language === undefined && timezone === undefined) {
+    return err("Nothing to update", 400, "EMPTY_UPDATE");
+  }
 
   // Only frontend can update plans
   if (plan && !isFrontend) {
@@ -146,7 +241,10 @@ users.patch("/:userId", authMiddleware, async (c) => {
   const bindings: (string | null)[] = [now()];
 
   if (plan) { setParts.push("plan = ?"); bindings.push(plan); }
-  if (name) { setParts.push("name = ?"); bindings.push(name); }
+  if (newName !== undefined) { setParts.push("name = ?"); bindings.push(newName); }
+  if (newAvatar !== undefined) { setParts.push("avatar_url = ?"); bindings.push(newAvatar); }
+  if (language !== undefined) { setParts.push("language = ?"); bindings.push(language); }
+  if (timezone !== undefined) { setParts.push("timezone = ?"); bindings.push(timezone); }
   bindings.push(targetUserId);
 
   const result = await c.env.DB.prepare(
@@ -156,10 +254,24 @@ users.patch("/:userId", authMiddleware, async (c) => {
   if (!result.meta.changes) return err("User not found", 404, "NOT_FOUND");
 
   const updated = await c.env.DB.prepare(
-    `SELECT id, email, name, plan, created_at, updated_at FROM users WHERE id = ?`
-  ).bind(targetUserId).first();
+    `SELECT id, email, name, avatar_url, plan, clicks_this_month, clicks_limit, domains_limit, links_limit, language, timezone, created_at, updated_at FROM users WHERE id = ?`
+  ).bind(targetUserId).first<any>();
 
-  return ok(updated);
+  return ok({
+    id: updated.id,
+    email: updated.email,
+    name: updated.name,
+    fullName: updated.name,
+    avatarUrl: updated.avatar_url,
+    avatar_url: updated.avatar_url,
+    plan: updated.plan,
+    language: updated.language,
+    timezone: updated.timezone,
+    createdAt: updated.created_at,
+    created_at: updated.created_at,
+    updatedAt: updated.updated_at,
+    updated_at: updated.updated_at,
+  });
 });
 
 // ─── POST /api/v1/users/:userId/keys  (create API key) ────────────────────────

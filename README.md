@@ -128,19 +128,44 @@ console.log("Top Appareils :", stats.topDevices);
 
 ---
 
+### 6. Consulter et mettre à jour son profil utilisateur
+
+Récupérez les informations de votre compte (email, nom complet, plan, quotas de clics et liens) :
+
+```typescript
+const user = await lsh.users.me();
+
+console.log("Email :", user.email);
+console.log("Nom complet :", user.fullName || user.name);
+console.log("Plan actuel :", user.plan);
+console.log("Liens créés :", user.linksCount);
+console.log("Clics ce mois-ci :", user.clicksThisMonth);
+
+// Mettre à jour son nom ou sa langue
+await lsh.users.update({
+  name: "Samuel KONVELBO",
+  language: "fr",
+});
+```
+
+---
+
 ## 🛠️ Méthodes Disponibles dans le SDK
 
 | Module | Méthode | Description |
 | :--- | :--- | :--- |
+| `lsh.users` | `.me()` | Obtenir le profil de l'utilisateur (email, nom, plan, quotas) |
+| `lsh.users` | `.update(options)` | Mettre à jour son nom complet, avatar, langue ou fuseau horaire |
 | `lsh.links` | `.create(options)` | Créer un nouveau lien court |
 | `lsh.links` | `.list(options)` | Lister ses liens avec pagination |
 | `lsh.links` | `.get(id)` | Récupérer les détails d'un lien |
 | `lsh.links` | `.update(id, options)` | Modifier l'URL cible, tags ou règles |
 | `lsh.links` | `.delete(id)` | Supprimer un lien et purger le cache Edge |
 | `lsh.track` | `.conversion(event)` | Enregistrer une conversion liée à un lien |
-| `lsh.analytics` | `.get(options)` | Consulter les métriques de trafic |
+| `lsh.analytics` | `.dashboard(options)` | Consulter le tableau de bord des métriques |
+| `lsh.analytics` | `.top(options)` | Top pays et top appareils |
 | `lsh.domains` | `.list()` | Lister ses domaines personnalisés |
-| `lsh.domains` | `.add(domain)` | Ajouter un domaine personnalisé |
+| `lsh.domains` | `.create(options)` | Ajouter un domaine personnalisé |
 | `lsh.domains` | `.verify(id)` | Vérifier la configuration DNS d'un domaine |
 
 ---

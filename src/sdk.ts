@@ -136,12 +136,38 @@ export interface CreateUserOptions {
   plan?: Plan;
 }
 
+export interface UpdateUserOptions {
+  name?:      string;
+  fullName?:  string;
+  avatarUrl?: string;
+  language?:  string;
+  timezone?:  string;
+}
+
 export interface UserResponse {
-  id:         string;
-  email:      string;
-  name:       string | null;
-  plan:       Plan;
-  created_at: string;
+  id:                string;
+  email:             string;
+  name:              string | null;
+  fullName?:         string | null;
+  avatarUrl?:        string | null;
+  avatar_url?:       string | null;
+  plan:              Plan;
+  clicksThisMonth?:  number;
+  clicks_this_month?: number;
+  clicksLimit?:      number;
+  clicks_limit?:     number;
+  linksLimit?:       number;
+  links_limit?:      number;
+  domainsLimit?:     number;
+  domains_limit?:    number;
+  linksCount?:       number;
+  domainsCount?:     number;
+  language?:         string;
+  timezone?:         string;
+  createdAt?:        string;
+  created_at:        string;
+  updatedAt?:        string;
+  updated_at?:       string;
 }
 
 export interface ApiKeyResponse {
@@ -173,7 +199,7 @@ class HttpClient {
   }
 
   private async request<T>(
-    method:  'GET' | 'POST' | 'DELETE',
+    method:  'GET' | 'POST' | 'PATCH' | 'DELETE',
     path:    string,
     body?:   unknown,
     params?: Record<string, string | number | undefined>
@@ -223,6 +249,10 @@ class HttpClient {
     return this.request<T>('POST', path, body);
   }
 
+  patch<T>(path: string, body: unknown): Promise<T> {
+    return this.request<T>('PATCH', path, body);
+  }
+
   delete<T>(path: string): Promise<T> {
     return this.request<T>('DELETE', path);
   }
@@ -246,6 +276,10 @@ class LinksModule {
 
   get(id: string): Promise<LinkResponse> {
     return this.http.get<LinkResponse>(`/api/v1/links/${id}`);
+  }
+
+  update(id: string, options: Partial<CreateLinkOptions>): Promise<LinkResponse> {
+    return this.http.patch<LinkResponse>(`/api/v1/links/${id}`, options);
   }
 
   delete(id: string): Promise<{ deleted: boolean; id: string }> {
@@ -380,6 +414,10 @@ class UsersModule {
 
   me(): Promise<UserResponse> {
     return this.http.get<UserResponse>('/api/v1/users/me');
+  }
+
+  update(options: UpdateUserOptions): Promise<UserResponse> {
+    return this.http.patch<UserResponse>('/api/v1/users/me', options);
   }
 
   createApiKey(
