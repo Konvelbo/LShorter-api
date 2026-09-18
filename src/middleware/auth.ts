@@ -3,7 +3,7 @@
 // =================================================================
 
 import { type MiddlewareHandler } from 'hono';
-import { type CloudflareBindings, type AuthContext, type Plan } from '../lib/types';
+import { type CloudflareBindings, type AuthContext, type Plan, PLAN_LIMITS } from '../lib/types';
 import { err, sha256, now } from '../lib/utils';
 
 export const authMiddleware: MiddlewareHandler<{
@@ -35,17 +35,39 @@ export const authMiddleware: MiddlewareHandler<{
     const finalEmail = userEmail || `${finalUserId}@lshorter.local`;
     const finalName = userName || 'Dashboard User';
 
+    const activeRequestedPlan: Plan = requestedPlan || 'FREEMIUM';
+    const limits = PLAN_LIMITS[activeRequestedPlan] || PLAN_LIMITS.FREEMIUM;
+
     // Auto-create or update user in D1 with real email, name, and plan
     try {
       await c.env.DB.prepare(
-        `INSERT INTO users (id, email, name, plan)
-         VALUES (?, ?, ?, COALESCE(?, 'FREEMIUM'))
+        `INSERT INTO users (id, email, name, plan, clicks_limit, domains_limit, links_limit)
+         VALUES (?, ?, ?, COALESCE(?, 'FREEMIUM'), ?, ?, ?)
          ON CONFLICT(id) DO UPDATE SET
            email = CASE WHEN excluded.email NOT LIKE '%@lshorter.local' THEN excluded.email ELSE users.email END,
            name = CASE WHEN excluded.name != 'Dashboard User' THEN excluded.name ELSE users.name END,
            plan = CASE WHEN ? IS NOT NULL THEN ? ELSE users.plan END,
+           clicks_limit = CASE WHEN ? IS NOT NULL THEN ? ELSE users.clicks_limit END,
+           domains_limit = CASE WHEN ? IS NOT NULL THEN ? ELSE users.domains_limit END,
+           links_limit = CASE WHEN ? IS NOT NULL THEN ? ELSE users.links_limit END,
            updated_at = CURRENT_TIMESTAMP`
-      ).bind(finalUserId, finalEmail, finalName, requestedPlan || null, requestedPlan || null, requestedPlan || null).run();
+      ).bind(
+        finalUserId,
+        finalEmail,
+        finalName,
+        requestedPlan || null,
+        limits.clicks,
+        limits.domains,
+        limits.links,
+        requestedPlan || null,
+        requestedPlan || null,
+        requestedPlan || null,
+        limits.clicks,
+        requestedPlan || null,
+        limits.domains,
+        requestedPlan || null,
+        limits.links
+      ).run();
     } catch {}
 
     const userRow = await c.env.DB.prepare(

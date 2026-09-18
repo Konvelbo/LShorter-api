@@ -3,7 +3,7 @@
 // =================================================================
 
 import { Hono } from "hono";
-import { type CloudflareBindings, type AuthContext } from "../lib/types";
+import { type CloudflareBindings, type AuthContext, type Plan, PLAN_LIMITS } from "../lib/types";
 import { authMiddleware } from "../middleware/auth";
 import { rateLimit } from "../middleware/ratelimit";
 import { CreateUserSchema, CreateApiKeySchema } from "../lib/schemas";
@@ -55,29 +55,33 @@ const handleUserSync = async (c: any) => {
   const email = parsed.data.email.trim().toLowerCase();
   const id = providedId || uid("usr");
   const timestamp = now();
+  const limits = PLAN_LIMITS[plan as Plan] || PLAN_LIMITS.FREEMIUM;
 
   try {
-    // Upsert into D1 users table (columns: id, email, name, plan, created_at, updated_at)
+    // Upsert into D1 users table
     await c.env.DB.prepare(
-      `INSERT INTO users (id, email, name, plan, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?)
+      `INSERT INTO users (id, email, name, plan, clicks_limit, domains_limit, links_limit, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(id) DO UPDATE SET
          name = COALESCE(excluded.name, users.name),
          email = excluded.email,
          plan = excluded.plan,
+         clicks_limit = excluded.clicks_limit,
+         domains_limit = excluded.domains_limit,
+         links_limit = excluded.links_limit,
          updated_at = excluded.updated_at`,
     )
-      .bind(id, email, name ?? null, plan, timestamp, timestamp)
+      .bind(id, email, name ?? null, plan, limits.clicks, limits.domains, limits.links, timestamp, timestamp)
       .run();
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : String(e);
     if (msg.includes("UNIQUE") && msg.includes("email")) {
       // If email is unique but ID is different, update by email
       await c.env.DB.prepare(
-        `UPDATE users SET name = COALESCE(?, name), plan = ?, updated_at = ?
+        `UPDATE users SET name = COALESCE(?, name), plan = ?, clicks_limit = ?, domains_limit = ?, links_limit = ?, updated_at = ?
          WHERE email = ?`,
       )
-        .bind(name ?? null, plan, timestamp, email)
+        .bind(name ?? null, plan, limits.clicks, limits.domains, limits.links, timestamp, email)
         .run();
     } else {
       throw e;
@@ -108,6 +112,12 @@ users.get("/me", authMiddleware, async (c) => {
     c.env.DB.prepare(`SELECT COUNT(*) as count FROM custom_domains WHERE user_id = ?`).bind(userId).first<{ count: number }>().catch(() => ({ count: 0 })),
   ]);
 
+  const activePlan = (row.plan || "FREEMIUM") as Plan;
+  const limits = PLAN_LIMITS[activePlan] || PLAN_LIMITS.FREEMIUM;
+  const effectiveClicksLimit = row.clicks_limit !== null && row.clicks_limit !== undefined ? row.clicks_limit : limits.clicks;
+  const effectiveDomainsLimit = row.domains_limit !== null && row.domains_limit !== undefined ? row.domains_limit : limits.domains;
+  const effectiveLinksLimit = row.links_limit !== null && row.links_limit !== undefined ? row.links_limit : limits.links;
+
   return ok({
     id: row.id,
     email: row.email,
@@ -118,12 +128,12 @@ users.get("/me", authMiddleware, async (c) => {
     plan: row.plan,
     clicksThisMonth: row.clicks_this_month ?? 0,
     clicks_this_month: row.clicks_this_month ?? 0,
-    clicksLimit: row.clicks_limit,
-    clicks_limit: row.clicks_limit,
-    domainsLimit: row.domains_limit,
-    domains_limit: row.domains_limit,
-    linksLimit: row.links_limit,
-    links_limit: row.links_limit,
+    clicksLimit: effectiveClicksLimit,
+    clicks_limit: effectiveClicksLimit,
+    domainsLimit: effectiveDomainsLimit,
+    domains_limit: effectiveDomainsLimit,
+    linksLimit: effectiveLinksLimit,
+    links_limit: effectiveLinksLimit,
     linksCount: linksCountRow?.count ?? 0,
     domainsCount: domainsCountRow?.count ?? 0,
     language: row.language || 'fr',
@@ -238,9 +248,13 @@ users.patch("/:userId", authMiddleware, async (c) => {
   }
 
   const setParts: string[] = ["updated_at = ?"];
-  const bindings: (string | null)[] = [now()];
+  const bindings: (string | null | number)[] = [now()];
 
-  if (plan) { setParts.push("plan = ?"); bindings.push(plan); }
+  if (plan) {
+    const limits = PLAN_LIMITS[plan as Plan] || PLAN_LIMITS.FREEMIUM;
+    setParts.push("plan = ?", "clicks_limit = ?", "domains_limit = ?", "links_limit = ?");
+    bindings.push(plan, limits.clicks, limits.domains, limits.links);
+  }
   if (newName !== undefined) { setParts.push("name = ?"); bindings.push(newName); }
   if (newAvatar !== undefined) { setParts.push("avatar_url = ?"); bindings.push(newAvatar); }
   if (language !== undefined) { setParts.push("language = ?"); bindings.push(language); }
@@ -265,6 +279,14 @@ users.patch("/:userId", authMiddleware, async (c) => {
     avatarUrl: updated.avatar_url,
     avatar_url: updated.avatar_url,
     plan: updated.plan,
+    clicksThisMonth: updated.clicks_this_month ?? 0,
+    clicks_this_month: updated.clicks_this_month ?? 0,
+    clicksLimit: updated.clicks_limit,
+    clicks_limit: updated.clicks_limit,
+    domainsLimit: updated.domains_limit,
+    domains_limit: updated.domains_limit,
+    linksLimit: updated.links_limit,
+    links_limit: updated.links_limit,
     language: updated.language,
     timezone: updated.timezone,
     createdAt: updated.created_at,
@@ -309,11 +331,15 @@ users.post(
     const keyId = uid("key");
 
     try {
+      const userRow = await c.env.DB.prepare(`SELECT plan FROM users WHERE id = ?`).bind(targetUserId).first<{ plan: string }>();
+      const userPlan = (userRow?.plan || 'FREEMIUM') as Plan;
+      const rateLimitVal = PLAN_LIMITS[userPlan]?.rateLimit ?? 60;
+
       await c.env.DB.prepare(
-        `INSERT INTO api_keys (id, user_id, key_hash, name, created_at)
-         VALUES (?, ?, ?, ?, ?)`,
+        `INSERT INTO api_keys (id, user_id, key_hash, name, rate_limit, created_at)
+         VALUES (?, ?, ?, ?, ?, ?)`,
       )
-        .bind(keyId, targetUserId, hash, parsed.data.name, now())
+        .bind(keyId, targetUserId, hash, parsed.data.name, rateLimitVal, now())
         .run();
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);

@@ -31,7 +31,14 @@ domains.post(
     const { domain } = parsed.data;
 
     // Check domain quota for this plan
-    const maxDomains = PLAN_LIMITS[plan]?.domains ?? 3;
+    const maxDomains = PLAN_LIMITS[plan]?.domains ?? 0;
+    if (maxDomains === 0) {
+      return err(
+        `Custom domains are not available on the Free plan. Upgrade to Pro, Business, or Enterprise to connect custom domains.`,
+        403,
+        'PLAN_UPGRADE_REQUIRED'
+      );
+    }
     const usedRow = await c.env.DB.prepare(
       `SELECT COUNT(*) as n FROM custom_domains WHERE user_id = ?`
     ).bind(userId).first<{ n: number }>();
