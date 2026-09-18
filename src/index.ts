@@ -208,11 +208,6 @@ app.post("/api/v1/upload-image", async (c) => {
   }
 });
 
-// ─── Short-link redirect ──────────────────────────────────────────────────────
-// Mounted at root to catch `/r/:slug` for the default domain
-// and `/:slug` for custom domains.
-app.route("/", redirectRouter);
-
 // ─── API v1 Routes ────────────────────────────────────────────────────────────
 
 app.route("/api/v1/users", usersRouter);
@@ -220,6 +215,10 @@ app.route("/api/v1/links", linksRouter);
 app.route("/api/v1/track", trackRouter);
 app.route("/api/v1/analytics", analyticsRouter);
 app.route("/api/v1/domains", domainsRouter);
+
+// ─── Short-link redirect (Mounted after API routes) ───────────────────────────
+// Catches `/r/:slug` for the default domain and `/:slug` for custom domains.
+app.route("/", redirectRouter);
 
 // ─── 404 Catch-all ────────────────────────────────────────────────────────────
 

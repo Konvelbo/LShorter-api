@@ -464,6 +464,9 @@ redirect.on(['GET', 'POST'], '/r/:slug', async (c) => {
 // ─── Direct /:slug fallback ──────────────────────────────────────────────────
 redirect.on(['GET', 'POST'], '/:slug', async (c) => {
   const slug = c.req.param('slug');
+  if (slug === 'api' || slug === 'health' || slug === 'favicon.ico') {
+    return c.text('Not found', 404);
+  }
   const host = c.req.header('host') ?? c.env.DEFAULT_DOMAIN ?? 'lsho.cc';
   const rawDomain = host.split(':')[0];
   const defaultDomain = c.env.DEFAULT_DOMAIN ?? 'lsho.cc';
