@@ -1,6 +1,6 @@
 {
   "name": "lshorter-api",
-  "version": "2.0.4",
+  "version": "2.0.5",
   "description": "Official TypeScript / JavaScript SDK for LShorter Edge URL Shortener & Analytics",
   "author": "KONVELBO Samuel",
   "homepage": "https://lsho.cc",
