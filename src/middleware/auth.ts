@@ -25,7 +25,7 @@ export const authMiddleware: MiddlewareHandler<{
     const userEmail = c.req.header('X-User-Email') || '';
     const userName = c.req.header('X-User-Name') || '';
     const rawRequestedPlan = c.req.header('X-User-Plan') || c.req.query('plan');
-    const validPlans: Plan[] = ['FREEMIUM', 'STARTER', 'PRO', 'BUSINESS', 'ENTERPRISE'];
+    const validPlans: Plan[] = ['FREE', 'FREEMIUM', 'STARTER', 'PRO', 'BUSINESS', 'ENTERPRISE'];
     const requestedPlan: Plan | undefined =
       rawRequestedPlan && validPlans.includes(rawRequestedPlan.toUpperCase() as Plan)
         ? (rawRequestedPlan.toUpperCase() as Plan)
@@ -112,6 +112,7 @@ export function requirePlan(
   minPlan: Plan
 ): MiddlewareHandler<{ Bindings: CloudflareBindings; Variables: { auth: AuthContext } }> {
   const PLAN_LEVELS: Record<Plan, number> = {
+    FREE:       0,
     FREEMIUM:   0,
     STARTER:    1,
     PRO:        2,

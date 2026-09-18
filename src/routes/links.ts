@@ -294,18 +294,34 @@ links.post(
     ).length;
     const totalRules = activeRoutingRules + activeGeoRules + activeDeviceRules;
 
-    if (plan === "FREEMIUM" && totalRules > 0) {
+    const isFreeTier = plan === "FREEMIUM" || plan === "FREE" || plan === "STARTER";
+
+    if (isFreeTier && totalRules > 0) {
       return err(
-        "Smart routing and targeting rules (Geo, Device, Dynamic routing) are not available on the Freemium plan. Upgrade to PRO.",
+        "Smart routing and targeting rules (Geo, Device, Dynamic routing) are not available on the Free plan. Upgrade to PRO.",
         403,
         "PLAN_UPGRADE_REQUIRED",
       );
     }
 
-    // Password & Cloaking protection requires PRO or higher
-    if ((password || isCloaked) && plan === "FREEMIUM") {
+    // Link Protection, Password, Cloaking, Click Limits & Expiry require PRO or higher
+    const rawMaxClicks =
+      (parsed.data as any).maxClicks !== undefined
+        ? (parsed.data as any).maxClicks
+        : (parsed.data as any).max_clicks;
+    const rawFallbackUrl =
+      (parsed.data as any).fallbackUrl || (parsed.data as any).fallback_url;
+    const hasProtectionOrExpiry = Boolean(
+      password ||
+      isCloaked ||
+      hideReferrer ||
+      expiresAt ||
+      (rawMaxClicks !== undefined && rawMaxClicks !== null && rawMaxClicks !== "" && Number(rawMaxClicks) > 0) ||
+      rawFallbackUrl
+    );
+    if (hasProtectionOrExpiry && isFreeTier) {
       return err(
-        "Password protection and link cloaking require the PRO plan or higher.",
+        "Link protection, password security, cloaking, and expiration rules require the PRO plan or higher.",
         403,
         "PLAN_UPGRADE_REQUIRED",
       );
@@ -621,8 +637,9 @@ links.patch("/:id", async (c) => {
     twitter_card?: string | null;
   };
 
-  // Plan constraint: routing rules forbidden on FREEMIUM
-  if (plan === "FREEMIUM") {
+  // Plan constraint: routing rules forbidden on Free tier
+  const isFreeTier = plan === "FREEMIUM" || plan === "FREE" || plan === "STARTER";
+  if (isFreeTier) {
     const hasGeo =
       updates.geoTargeting &&
       Object.values(updates.geoTargeting).filter(Boolean).length > 0;
@@ -636,7 +653,23 @@ links.patch("/:id", async (c) => {
       ).length > 0;
     if (hasGeo || hasDevice || hasRouting) {
       return err(
-        "Smart routing and targeting rules (Geo, Device, Dynamic routing) are not available on the Freemium plan. Upgrade to PRO.",
+        "Smart routing and targeting rules (Geo, Device, Dynamic routing) are not available on the Free plan. Upgrade to PRO.",
+        403,
+        "PLAN_UPGRADE_REQUIRED",
+      );
+    }
+
+    const hasProtectionOrExpiry = Boolean(
+      updates.password ||
+      updates.isCloaked ||
+      updates.hideReferrer ||
+      updates.expiresAt ||
+      (updates.maxClicks !== undefined && updates.maxClicks !== null && updates.maxClicks !== "" && Number(updates.maxClicks) > 0) ||
+      updates.fallbackUrl
+    );
+    if (hasProtectionOrExpiry) {
+      return err(
+        "Link protection, password security, cloaking, and expiration rules require the PRO plan or higher.",
         403,
         "PLAN_UPGRADE_REQUIRED",
       );

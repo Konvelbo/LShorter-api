@@ -22,7 +22,7 @@ export type DeviceKey =
   | 'ios' | 'android' | 'tablet' | 'mobile'
   | 'windows' | 'mac' | 'linux' | 'desktop';
 
-export type Plan = 'FREEMIUM' | 'STARTER' | 'PRO';
+export type Plan = 'FREE' | 'FREEMIUM' | 'STARTER' | 'PRO' | 'BUSINESS' | 'ENTERPRISE';
 
 export interface QuickLinkConfig {
   /** Your API key (sk_live_... or sk_test_...) */

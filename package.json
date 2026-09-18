@@ -37,8 +37,7 @@
     "cf-typegen": "wrangler types --env-interface CloudflareBindings",
     "db:migrate": "wrangler d1 execute quicklink-db --remote --file=./schema.sql",
     "db:migrate:local": "wrangler d1 execute quicklink-db --local --file=./schema.sql",
-    "db:incremental": "wrangler d1 execute quicklink-db --remote --file=./scripts/migrate.sql",
-    "test": "node ./node_modules/jest/bin/jest.js --config jest.config.cjs"
+    "db:incremental": "wrangler d1 execute quicklink-db --remote --file=./scripts/migrate.sql"
   },
   "dependencies": {
     "hono": "^4.12.32",

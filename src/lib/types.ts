@@ -15,21 +15,23 @@ export interface CloudflareBindings {
 
 // ─── Plan ────────────────────────────────────────────────────────────────────
 
-export type Plan = 'FREEMIUM' | 'PRO' | 'BUSINESS' | 'STARTER' | 'ENTERPRISE';
+export type Plan = 'FREE' | 'FREEMIUM' | 'PRO' | 'BUSINESS' | 'STARTER' | 'ENTERPRISE';
 
 export const PLAN_LIMITS: Record<Plan, { clicks: number; domains: number; links: number }> = {
-  FREEMIUM:   { clicks: 100_000,   domains: 3,  links: 1_000 },
-  STARTER:    { clicks: 100_000,   domains: 3,  links: 1_000 },
-  PRO:        { clicks: 1_000_000, domains: 15, links: -1 },
-  BUSINESS:   { clicks: -1,        domains: 50, links: -1 },
-  ENTERPRISE: { clicks: -1,        domains: 50, links: -1 },
+  FREE:       { clicks: 2_500,     domains: 0,  links: 50 },
+  FREEMIUM:   { clicks: 2_500,     domains: 0,  links: 50 },
+  STARTER:    { clicks: 2_500,     domains: 0,  links: 50 },
+  PRO:        { clicks: 500_000,   domains: 3,  links: 1_000 },
+  BUSINESS:   { clicks: 1_200_000, domains: 15, links: -1 },
+  ENTERPRISE: { clicks: 5_000_000, domains: 50, links: -1 },
 };
 
 export const CUSTOM_DOMAIN_LIMITS: Record<Plan, number> = {
-  FREEMIUM: 3,
-  STARTER: 3,
-  PRO: 15,
-  BUSINESS: 50,
+  FREE: 0,
+  FREEMIUM: 0,
+  STARTER: 0,
+  PRO: 3,
+  BUSINESS: 15,
   ENTERPRISE: 50,
 };
 
