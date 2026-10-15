@@ -122,8 +122,23 @@ export interface AnalyticsOptions {
 }
 
 export interface AnalyticsDashboard {
-  clicks:      { total: number; thisMonth: number };
-  conversions: Array<{ conversions: number; revenue: number; currency: string }>;
+  totalClicks:       number;
+  total_clicks?:      number;
+  uniqueClicks:      number;
+  unique_clicks?:     number;
+  trackedRevenue:    number;
+  tracked_revenue?:   number;
+  epc?:              number;
+  clicks?:           { total: number; thisMonth: number };
+  clicksByDay?:      Array<{ date: string; clicks: number }>;
+  topCountries?:     Array<{ country: string; clicks: number }>;
+  topCities?:        Array<{ city: string; clicks: number }>;
+  topDevices?:       Array<{ device: string; clicks: number }>;
+  topBrowsers?:      Array<{ browser: string; clicks: number }>;
+  topOs?:            Array<{ os: string; clicks: number }>;
+  topReferrers?:     Array<{ referrer: string; clicks: number }>;
+  liveClickEvents?:   unknown[];
+  recentConversions?: unknown[];
 }
 
 export interface TopStats {
@@ -250,7 +265,13 @@ class HttpClient {
     }
 
     const res = await fetch(url, init);
-    const json = (await res.json()) as { success: boolean; data?: T; error?: string; code?: string };
+    const json = (await res.json()) as {
+      success: boolean;
+      data?: unknown;
+      pagination?: { page: number; limit: number; total: number };
+      error?: string;
+      code?: string;
+    };
 
     if (!res.ok || !json.success) {
       throw new QuickLinkError(
@@ -258,6 +279,13 @@ class HttpClient {
         res.status,
         json.code
       );
+    }
+
+    if (json.pagination !== undefined && Array.isArray(json.data)) {
+      return {
+        data: json.data,
+        pagination: json.pagination,
+      } as T;
     }
 
     return json.data as T;
