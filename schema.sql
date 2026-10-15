@@ -14,7 +14,7 @@ CREATE TABLE IF NOT EXISTS users (
     plan TEXT CHECK(plan IN ('FREEMIUM', 'PRO', 'BUSINESS', 'STARTER', 'ENTERPRISE')) DEFAULT 'FREEMIUM',
     clicks_this_month INTEGER DEFAULT 0,
     clicks_limit INTEGER DEFAULT 10000,
-    domains_limit INTEGER DEFAULT 0,
+    domains_limit INTEGER DEFAULT 3,
     links_limit INTEGER DEFAULT 50,
     two_factor_enabled BOOLEAN DEFAULT 0,
     two_factor_secret TEXT,
@@ -64,6 +64,14 @@ CREATE TABLE IF NOT EXISTS links (
     hide_referrer BOOLEAN DEFAULT 0,
     tags TEXT, -- JSON array
     expires_at DATETIME,
+    max_clicks INTEGER DEFAULT NULL,
+    fallback_url TEXT DEFAULT NULL,
+    password_plain TEXT DEFAULT NULL,
+    path_lock_mode TEXT DEFAULT 'off',
+    path_lock_prefix TEXT DEFAULT NULL,
+    path_lock_message TEXT DEFAULT NULL,
+    path_lock_password TEXT DEFAULT NULL,
+    pixels TEXT DEFAULT NULL, -- JSON array of retargeting pixel IDs
     is_active BOOLEAN DEFAULT 1,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -154,7 +162,30 @@ CREATE TABLE IF NOT EXISTS retargeting_pixels (
     FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
 );
 
+-- 8. Table Target & Limit Alerts (Notifications Dashboard)
+CREATE TABLE IF NOT EXISTS target_alerts (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    link_id TEXT DEFAULT NULL,
+    metric_type TEXT CHECK(metric_type IN ('clicks', 'revenue')) DEFAULT 'clicks',
+    period TEXT CHECK(period IN ('day', 'week', 'month')) DEFAULT 'month',
+    target_value REAL NOT NULL DEFAULT 1000,
+    current_value REAL DEFAULT 0,
+    notify_expired BOOLEAN DEFAULT 1,
+    notify_email BOOLEAN DEFAULT 1,
+    notify_bell BOOLEAN DEFAULT 1,
+    status TEXT CHECK(status IN ('active', 'paused', 'reached')) DEFAULT 'active',
+    last_notified_at DATETIME DEFAULT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY(link_id) REFERENCES links(id) ON DELETE CASCADE
+);
+
 -- Indexes
 CREATE INDEX IF NOT EXISTS idx_links_domain_slug ON links(domain_name, slug);
 CREATE INDEX IF NOT EXISTS idx_clicks_link_timestamp ON click_events(link_id, timestamp);
 CREATE INDEX IF NOT EXISTS idx_clicks_user_timestamp ON click_events(user_id, timestamp);
+CREATE INDEX IF NOT EXISTS idx_target_alerts_user_id ON target_alerts(user_id);
+CREATE INDEX IF NOT EXISTS idx_target_alerts_link_id ON target_alerts(link_id);
+CREATE INDEX IF NOT EXISTS idx_target_alerts_status ON target_alerts(status);

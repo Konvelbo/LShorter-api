@@ -17,22 +17,70 @@ export interface CloudflareBindings {
 
 export type Plan = 'FREE' | 'FREEMIUM' | 'PRO' | 'BUSINESS' | 'STARTER' | 'ENTERPRISE';
 
-export const PLAN_LIMITS: Record<Plan, { clicks: number; domains: number; links: number; rateLimit: number }> = {
-  FREE:       { clicks: 10_000,     domains: 0,  links: 50,    rateLimit: 60 },
-  FREEMIUM:   { clicks: 10_000,     domains: 0,  links: 50,    rateLimit: 60 },
-  STARTER:    { clicks: 10_000,     domains: 0,  links: 50,    rateLimit: 60 },
-  PRO:        { clicks: 500_000,    domains: 3,  links: 1_000, rateLimit: 1_000 },
-  BUSINESS:   { clicks: 2_000_000,  domains: 15, links: -1,    rateLimit: 5_000 },
-  ENTERPRISE: { clicks: 10_000_000, domains: 50, links: -1,    rateLimit: 15_000 },
+export interface PlanQuotaSpec {
+  clicks: number;
+  domains: number;
+  links: number;
+  rateLimit: number;
+  overageAllowed: boolean;
+  overageUnlimited: boolean;
+  overageBatchSize: number;
+  overageCostPerBatch: number;
+  overageLabel: string;
+}
+
+export const PLAN_LIMITS: Record<Plan, PlanQuotaSpec> = {
+  FREE:       { clicks: 10_000,    domains: 3,  links: 50,    rateLimit: 60,     overageAllowed: false, overageUnlimited: false, overageBatchSize: 0,       overageCostPerBatch: 0,   overageLabel: 'Hard limit at 10,000 clicks/mo' },
+  FREEMIUM:   { clicks: 10_000,    domains: 3,  links: 50,    rateLimit: 60,     overageAllowed: false, overageUnlimited: false, overageBatchSize: 0,       overageCostPerBatch: 0,   overageLabel: 'Hard limit at 10,000 clicks/mo' },
+  STARTER:    { clicks: 10_000,    domains: 3,  links: 50,    rateLimit: 60,     overageAllowed: false, overageUnlimited: false, overageBatchSize: 0,       overageCostPerBatch: 0,   overageLabel: 'Hard limit at 10,000 clicks/mo' },
+  PRO:        { clicks: 150_000,   domains: 6,  links: 1_000, rateLimit: 200,    overageAllowed: true,  overageUnlimited: false, overageBatchSize: 50_000,  overageCostPerBatch: 3.0, overageLabel: '$3 per additional 50,000 clicks/mo' },
+  BUSINESS:   { clicks: 500_000,   domains: 15, links: -1,    rateLimit: 600,    overageAllowed: true,  overageUnlimited: false, overageBatchSize: 125_000, overageCostPerBatch: 8.0, overageLabel: '$8 per additional 125,000 clicks/mo' },
+  ENTERPRISE: { clicks: -1,        domains: -1, links: -1,    rateLimit: 1400,   overageAllowed: true,  overageUnlimited: true,  overageBatchSize: 0,       overageCostPerBatch: 0,   overageLabel: 'Unlimited clicks included ($0 extra)' },
 };
 
+export function computePlanOverage(plan: Plan, clicksThisMonth: number) {
+  const spec = PLAN_LIMITS[plan] || PLAN_LIMITS.FREEMIUM;
+  if (spec.clicks === -1 || spec.overageUnlimited) {
+    return {
+      allowed: true,
+      unlimited: true,
+      batchSize: 0,
+      costPerBatch: 0,
+      label: spec.overageLabel || 'Unlimited clicks included ($0 extra)',
+      overageClicks: 0,
+      batches: 0,
+      estimatedCost: 0,
+    };
+  }
+  const overageClicks = Math.max(0, clicksThisMonth - spec.clicks);
+  const batches =
+    !spec.overageUnlimited && spec.overageBatchSize > 0 && overageClicks > 0
+      ? Math.ceil(overageClicks / spec.overageBatchSize)
+      : 0;
+  const estimatedCost =
+    !spec.overageUnlimited && batches > 0
+      ? Number((batches * spec.overageCostPerBatch).toFixed(2))
+      : 0;
+
+  return {
+    allowed: spec.overageAllowed,
+    unlimited: spec.overageUnlimited,
+    batchSize: spec.overageBatchSize,
+    costPerBatch: spec.overageCostPerBatch,
+    label: spec.overageLabel,
+    overageClicks,
+    batches,
+    estimatedCost,
+  };
+}
+
 export const CUSTOM_DOMAIN_LIMITS: Record<Plan, number> = {
-  FREE: 0,
-  FREEMIUM: 0,
-  STARTER: 0,
-  PRO: 3,
+  FREE: 3,
+  FREEMIUM: 3,
+  STARTER: 3,
+  PRO: 6,
   BUSINESS: 15,
-  ENTERPRISE: 50,
+  ENTERPRISE: -1,
 };
 
 // ─── Auth context ─────────────────────────────────────────────────────────────
@@ -148,6 +196,23 @@ export interface ClickEventRow {
   is_unique: number;
   conversion_amount: number;
   timestamp: string;
+}
+
+export interface TargetAlertRow {
+  id: string;
+  user_id: string;
+  link_id: string | null;
+  metric_type: "clicks" | "revenue";
+  period: "day" | "week" | "month";
+  target_value: number;
+  current_value: number;
+  notify_expired: number;
+  notify_email: number;
+  notify_bell: number;
+  status: "active" | "paused" | "reached";
+  last_notified_at: string | null;
+  created_at: string;
+  updated_at: string;
 }
 
 // ─── API Response envelope ────────────────────────────────────────────────────

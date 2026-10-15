@@ -17,6 +17,9 @@ import linksRouter from "./routes/links";
 import trackRouter from "./routes/track";
 import analyticsRouter from "./routes/analytics";
 import domainsRouter from "./routes/domains";
+import pixelsRouter from "./routes/pixels";
+import webhooksRouter from "./routes/webhooks";
+import targetsRouter from "./routes/targets";
 
 // ─── App ──────────────────────────────────────────────────────────────────────
 
@@ -37,11 +40,23 @@ app.use(
     xContentTypeOptions: "nosniff",
     xFrameOptions: "DENY",
     referrerPolicy: false, // managed per-link in redirect.ts
+    crossOriginResourcePolicy: "cross-origin",
   }),
 );
 
-// CORS — strict configuration
+// CORS — strict configuration for API, open for public image assets
 app.use("*", async (c, next) => {
+  if (c.req.path.startsWith("/api/v1/images/")) {
+    c.header("Access-Control-Allow-Origin", "*");
+    c.header("Access-Control-Allow-Methods", "GET, HEAD, OPTIONS");
+    c.header("Cross-Origin-Resource-Policy", "cross-origin");
+    c.header("Cross-Origin-Opener-Policy", "unsafe-none");
+    if (c.req.method === "OPTIONS") {
+      return c.body(null, 204);
+    }
+    return next();
+  }
+
   const rawOrigins =
     c.env.ALLOWED_ORIGINS ||
     "http://localhost:3000,https://lsho.cc,https://lshorter-api.fiatechnologiecam.workers.dev";
@@ -60,8 +75,8 @@ app.use("*", async (c, next) => {
   })(c, next);
 });
 
-// Global IP-level rate limiter: 200 req / min across all routes
-app.use("*", rateLimit({ limit: 200, windowSeconds: 60, keyType: "ip" }));
+// Global IP-level safety rate limiter (accommodates Enterprise up to 1,400 req/min): 2,000 req / min across all routes
+app.use("*", rateLimit({ limit: 2000, windowSeconds: 60, keyType: "ip" }));
 
 // ─── Health / Diagnostic ──────────────────────────────────────────────────────
 
@@ -109,7 +124,7 @@ app.get("/health", healthHandler);
 app.get("/api/v1/health", healthHandler);
 
 // ─── Public Image Asset Server for Social Previews & Banners ─────────────────
-app.get("/api/v1/images/:id", async (c) => {
+app.on(["GET", "HEAD"], "/api/v1/images/:id", async (c) => {
   const id = c.req.param("id");
 
   // 1. Try KV first
@@ -124,7 +139,7 @@ app.get("/api/v1/images/:id", async (c) => {
     ? "image/gif"
     : "image/png";
 
-  // 2. Fallback to D1 database (unlimited storage)
+  // 2. Fallback to D1 database and warm KV
   if (!data) {
     const row = await c.env.DB.prepare(
       `SELECT mime_type, data FROM uploaded_images WHERE id = ?`
@@ -139,19 +154,34 @@ app.get("/api/v1/images/:id", async (c) => {
         bytes[i] = binaryStr.charCodeAt(i);
       }
       data = bytes.buffer;
+
+      // Warm KV cache permanently so D1 is never touched again for this image
+      try {
+        c.executionCtx.waitUntil(c.env.URL_KV.put(`image:${id}`, data));
+      } catch {
+        c.env.URL_KV.put(`image:${id}`, data).catch(() => {});
+      }
     }
   }
 
   if (!data) return c.text("Image not found", 404);
 
-  return new Response(data, {
-    status: 200,
-    headers: {
-      "Content-Type": mimeType,
-      "Cache-Control": "public, max-age=31536000, immutable",
-      "Access-Control-Allow-Origin": "*",
-    },
-  });
+  const headers: Record<string, string> = {
+    "Content-Type": mimeType,
+    "Content-Length": String(data.byteLength),
+    "Cache-Control": "public, max-age=31536000, immutable",
+    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Allow-Methods": "GET, HEAD, OPTIONS",
+    "Cross-Origin-Resource-Policy": "cross-origin",
+    "Cross-Origin-Opener-Policy": "unsafe-none",
+    "Cross-Origin-Embedder-Policy": "unsafe-none",
+  };
+
+  if (c.req.method === "HEAD") {
+    return new Response(null, { status: 200, headers });
+  }
+
+  return new Response(data, { status: 200, headers });
 });
 
 // ─── Image Upload Endpoint for Banners & Logos (D1 Backed) ───────────────────
@@ -195,10 +225,32 @@ app.post("/api/v1/upload-image", async (c) => {
 
     const imageId = `banner_${Date.now()}_${Math.random().toString(36).substring(2, 7)}.${ext}`;
 
-    // Save permanently in D1
+    // Ensure table exists in Cloudflare D1
+    await c.env.DB.prepare(
+      `CREATE TABLE IF NOT EXISTS uploaded_images (
+         id TEXT PRIMARY KEY,
+         mime_type TEXT,
+         data TEXT,
+         created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+       )`
+    ).run().catch(() => {});
+
+    // Save permanently in Cloudflare D1
     await c.env.DB.prepare(
       `INSERT OR REPLACE INTO uploaded_images (id, mime_type, data) VALUES (?, ?, ?)`
     ).bind(imageId, mimeType, base64String).run();
+
+    // Also cache in Cloudflare KV if available
+    try {
+      if (c.env.URL_KV) {
+        const commaIdx = base64String.indexOf(",");
+        const rawB64 = commaIdx !== -1 ? base64String.substring(commaIdx + 1) : base64String;
+        const binaryStr = atob(rawB64);
+        const bytes = new Uint8Array(binaryStr.length);
+        for (let i = 0; i < binaryStr.length; i++) bytes[i] = binaryStr.charCodeAt(i);
+        await c.env.URL_KV.put(`image:${imageId}`, bytes.buffer);
+      }
+    } catch {}
 
     const publicUrl = `https://lshorter-api.fiatechnologiecam.workers.dev/api/v1/images/${imageId}`;
     return c.json({ success: true, url: publicUrl, imageId });
@@ -215,6 +267,9 @@ app.route("/api/v1/links", linksRouter);
 app.route("/api/v1/track", trackRouter);
 app.route("/api/v1/analytics", analyticsRouter);
 app.route("/api/v1/domains", domainsRouter);
+app.route("/api/v1/pixels", pixelsRouter);
+app.route("/api/v1/webhooks", webhooksRouter);
+app.route("/api/v1/targets", targetsRouter);
 
 // ─── Short-link redirect (Mounted after API routes) ───────────────────────────
 // Catches `/r/:slug` for the default domain and `/:slug` for custom domains.

@@ -14,6 +14,7 @@ L'API et le SDK **LShorter** permettent aux développeurs et aux entreprises d'i
 - ⚡ **Redirections Edge ultra-rapides (< 15ms)** propulsées par le réseau mondial Cloudflare.
 - 🎯 **Ciblage & Routage intelligent** : Redirigez vos utilisateurs selon leur pays (Géo-ciblage) ou leur appareil (iOS, Android, Windows, Mac).
 - 🔒 **Sécurité & Liens Protégés** : Protection de liens par mot de passe, expiration automatique et masquage d'URL (*cloaking*).
+- 🛡️ **PathLock™ & Isolation de Navigation (Plan PRO)** : Verrouillez vos visiteurs sur une page unique (*strict*) ou un entonnoir de vente (*funnel*) avec écran de sécurité Edge anti-dispersion.
 - 📊 **Analytics & Tracking de conversions** : Mesurez le nombre de clics, les pays, les navigateurs et suivez le chiffre d'affaires / conversions générés par chaque lien.
 - 🏷️ **Domaines Personnalisés** : Connectez vos propres noms de domaine de marque facilement.
 
@@ -72,28 +73,63 @@ console.log("QR Code :", link.qrCode);
 
 ---
 
-### 3. Créer un lien avec ciblage intelligent (Plan PRO)
+### 3. Créer un lien avec ciblage intelligent (Pays, Continent, Navigateur & Appareil — Plan PRO)
 
 ```typescript
 const smartLink = await lsh.links.create({
   targetUrl: "https://mon-site.com/default",
   slug: "app-download",
-  // Rediriger les utilisateurs selon leur appareil
+  // Règles de routage dynamique multi-conditions (Pays, Continent, Navigateur, OS, Appareil)
+  routingRules: [
+    {
+      id: "rule_africa_chrome",
+      title: "Afrique sur Chrome",
+      destinationUrl: "https://mon-site.com/afrique-chrome",
+      conditions: [
+        { id: "c1", type: "continent", operator: "est", value: "africa" },
+        { id: "c2", type: "navigateur", operator: "est", value: "chrome" },
+      ],
+    },
+    {
+      id: "rule_fr",
+      title: "Visiteurs France",
+      destinationUrl: "https://mon-site.com/fr",
+      conditions: [
+        { id: "c3", type: "pays", operator: "est", value: "FR" },
+      ],
+    },
+  ],
+  // Ou ciblage direct par appareil :
   deviceTargeting: {
     ios: "https://apps.apple.com/app/id123456789",
     android: "https://play.google.com/store/apps/details?id=com.app",
-  },
-  // Rediriger selon le pays
-  geoTargeting: {
-    FR: "https://mon-site.com/fr",
-    US: "https://mon-site.com/en",
   },
 });
 ```
 
 ---
 
-### 4. Suivre une conversion & Attribution Financière (E-commerce / Inscription / Vente)
+### 4. Créer un lien avec PathLock™ (Navigation Restreinte / Plan PRO)
+
+Verrouillez vos visiteurs sur une page de destination unique ou isolez un entonnoir de conversion multi-étapes sans risque de dispersion :
+
+```typescript
+const pathLockedLink = await lsh.links.create({
+  targetUrl: "https://maboutique.com/produit-luxe",
+  slug: "produit-valide",
+  // Mode d'isolation : 'strict' (mono-page) | 'funnel' (entonnoir & sous-chemins)
+  pathLockMode: "strict",
+  pathLockPrefix: "produit-luxe", // Optionnel : si vide en mode 'strict', verrouille sur l'URL exacte
+  pathLockPassword: "MonMotDePasseSecurite", // Optionnel : permet à l'équipe de débloquer la navigation et le bouton source
+  pathLockMessage: "La navigation est restreinte à cette page de présentation.",
+});
+
+console.log("Lien sécurisé PathLock :", pathLockedLink.shortUrl);
+```
+
+---
+
+### 5. Suivre une conversion & Attribution Financière (E-commerce / Inscription / Vente)
 
 Attribuez vos ventes, vos inscriptions et vos montants financiers à vos liens raccourcis. L'API et le SDK acceptent les informations complètes du client (Avatar, Nom complet, Email) qui seront automatiquement affichées dans la sous-page d'analyse des revenus du dashboard :
 
@@ -118,7 +154,7 @@ await lsh.track.conversion({
 
 ---
 
-### 5. Consulter les statistiques d'un lien
+### 6. Consulter les statistiques d'un lien
 
 ```typescript
 const stats = await lsh.analytics.get({
@@ -133,24 +169,19 @@ console.log("Top Appareils :", stats.topDevices);
 
 ---
 
-### 6. Consulter et mettre à jour son profil utilisateur
+### 7. Consulter ses quotas et limites d'utilisation (Lecture seule)
 
-Récupérez les informations de votre compte (email, nom complet, plan, quotas de clics et liens) :
+Vérifiez l'état de votre abonnement et vos quotas mensuels (`plan`, `linksCount`, `linksLimit`, `clicksThisMonth`, `clicksLimit`) depuis votre serveur.
+
+> 🔒 **Sécurité & Protection des données (PII) :** Pour protéger votre compte en cas d'exposition d'une clé API, les données personnelles (`nom`, `avatar`, `email` complet) sont masquées (`s***o@domaine.com`) et **aucune modification du profil ou du plan n'est autorisée via clé API** (`403 Forbidden`). Toute modification du profil s'effectue exclusivement depuis le Dashboard Web [https://lsho.cc](https://lsho.cc).
 
 ```typescript
-const user = await lsh.users.me();
+const quotas = await lsh.users.quotas(); // ou await lsh.users.me()
 
-console.log("Email :", user.email);
-console.log("Nom complet :", user.fullName || user.name);
-console.log("Plan actuel :", user.plan);
-console.log("Liens créés :", user.linksCount);
-console.log("Clics ce mois-ci :", user.clicksThisMonth);
-
-// Mettre à jour son nom ou sa langue
-await lsh.users.update({
-  name: "Samuel KONVELBO",
-  language: "fr",
-});
+console.log("Plan actuel :", quotas.plan);
+console.log(`Liens utilisés : ${quotas.linksCount} / ${quotas.linksLimit}`);
+console.log(`Clics ce mois-ci : ${quotas.clicksThisMonth} / ${quotas.clicksLimit}`);
+console.log(`Domaines actifs : ${quotas.domainsCount} / ${quotas.domainsLimit}`);
 ```
 
 ---
@@ -159,14 +190,13 @@ await lsh.users.update({
 
 | Module | Méthode | Description |
 | :--- | :--- | :--- |
-| `lsh.users` | `.me()` | Obtenir le profil de l'utilisateur (email, nom, plan, quotas) |
-| `lsh.users` | `.update(options)` | Mettre à jour son nom complet, avatar, langue ou fuseau horaire |
-| `lsh.links` | `.create(options)` | Créer un nouveau lien court |
+| `lsh.users` | `.quotas()` / `.me()` | Consulter en lecture seule le plan actif et les quotas (PII masquées, aucune écriture possible) |
+| `lsh.links` | `.create(options)` | Créer un nouveau lien court (avec routage, PathLock™, mot de passe, etc.) |
 | `lsh.links` | `.list(options)` | Lister ses liens avec pagination |
 | `lsh.links` | `.get(id)` | Récupérer les détails d'un lien |
-| `lsh.links` | `.update(id, options)` | Modifier l'URL cible, tags ou règles |
+| `lsh.links` | `.update(id, options)` | Modifier l'URL cible, tags ou règles de routage d'un lien |
 | `lsh.links` | `.delete(id)` | Supprimer un lien et purger le cache Edge |
-| `lsh.track` | `.conversion(event)` | Enregistrer une conversion liée à un lien |
+| `lsh.track` | `.conversion(event)` | Enregistrer une conversion financière liée à un lien |
 | `lsh.analytics` | `.dashboard(options)` | Consulter le tableau de bord des métriques |
 | `lsh.analytics` | `.top(options)` | Top pays et top appareils |
 | `lsh.domains` | `.list()` | Lister ses domaines personnalisés |

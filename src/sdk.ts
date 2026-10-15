@@ -212,7 +212,11 @@ class HttpClient {
   private readonly apiKey:  string;
 
   constructor(config: QuickLinkConfig) {
-    this.baseUrl = (config.baseUrl ?? 'https://api.lsho.cc').replace(/\/$/, '');
+    let base = (config.baseUrl ?? 'https://lshorter-api.fiatechnologiecam.workers.dev').replace(/\/$/, '');
+    if (base === 'https://lsho.cc' || base === 'https://api.lsho.cc') {
+      base = 'https://lshorter-api.fiatechnologiecam.workers.dev';
+    }
+    this.baseUrl = base;
     this.apiKey  = config.apiKey;
   }
 
@@ -424,39 +428,6 @@ class DomainsModule {
   }
 }
 
-// ─── Module: Users ────────────────────────────────────────────────────────────
-
-class UsersModule {
-  constructor(private readonly http: HttpClient) {}
-
-  create(options: CreateUserOptions): Promise<UserResponse> {
-    return this.http.post<UserResponse>('/api/v1/users', options);
-  }
-
-  me(): Promise<UserResponse> {
-    return this.http.get<UserResponse>('/api/v1/users/me');
-  }
-
-  update(options: UpdateUserOptions): Promise<UserResponse> {
-    return this.http.patch<UserResponse>('/api/v1/users/me', options);
-  }
-
-  createApiKey(
-    userId: string,
-    name = 'Default Key'
-  ): Promise<ApiKeyResponse> {
-    return this.http.post<ApiKeyResponse>(`/api/v1/users/${userId}/keys`, { name });
-  }
-
-  listApiKeys(userId: string): Promise<unknown[]> {
-    return this.http.get<unknown[]>(`/api/v1/users/${userId}/keys`);
-  }
-
-  deleteApiKey(userId: string, keyId: string): Promise<{ deleted: boolean }> {
-    return this.http.delete(`/api/v1/users/${userId}/keys/${keyId}`);
-  }
-}
-
 // ─── Main SDK Class ───────────────────────────────────────────────────────────
 
 /**
@@ -481,7 +452,6 @@ export class LShorter {
   public readonly track:     TrackModule;
   public readonly analytics: AnalyticsModule;
   public readonly domains:   DomainsModule;
-  public readonly users:     UsersModule;
 
   private readonly http: HttpClient;
 
@@ -491,7 +461,6 @@ export class LShorter {
     this.track     = new TrackModule(this.http);
     this.analytics = new AnalyticsModule(this.http);
     this.domains   = new DomainsModule(this.http);
-    this.users     = new UsersModule(this.http);
   }
 }
 

@@ -7,10 +7,10 @@ export interface DeviceInfo {
   type: 'mobile' | 'tablet' | 'desktop';
   /** Fine-grained key used in device_targeting JSON */
   key: DeviceKey;
-  /** OS name — exact values expected by the clicks table CHECK constraint */
-  os: 'iOS' | 'Android' | 'Windows' | 'macOS' | 'Linux' | 'unknown';
-  /** Browser name — exact values expected by the clicks table CHECK constraint */
-  browser: 'Safari' | 'Chrome' | 'Firefox' | 'Edge' | 'unknown';
+  /** OS name */
+  os: 'iOS' | 'Android' | 'Windows' | 'macOS' | 'Linux' | 'ChromeOS' | 'unknown' | string;
+  /** Browser name */
+  browser: 'Safari' | 'Chrome' | 'Firefox' | 'Edge' | 'Opera' | 'Brave' | 'Samsung' | 'Arc' | 'Vivaldi' | 'DuckDuckGo' | 'unknown' | string;
 }
 
 export type DeviceKey =
@@ -25,26 +25,41 @@ export type DeviceKey =
 
 /**
  * Parse a User-Agent string → { type, key, os, browser }.
- *
- * Detection priority:
- *  Browser : Edge → Chrome → Firefox → Safari (order matters — Edge includes "chrome")
- *  Device  : iPad / Android tablet → iPhone/Android → generic mobile → desktop OS
+ * Priority: Specific chromium-based browsers first, then Chrome, Firefox, Safari.
  */
 export function parseDevice(userAgent: string): DeviceInfo {
-  const ua = userAgent.toLowerCase();
+  const ua = (userAgent || '').toLowerCase();
 
-  // ── Browser detection (must run BEFORE device so all paths get a browser) ─
+  // ── Browser detection ───────────────────────────────────────────────────────
   let browser: DeviceInfo['browser'] = 'unknown';
   if (ua.includes('edg/') || ua.includes('edge/')) {
     browser = 'Edge';
-  } else if (ua.includes('chrome') || ua.includes('chromium') || ua.includes('crios')) {
-    browser = 'Chrome';
+  } else if (ua.includes('opr/') || ua.includes('opera')) {
+    browser = 'Opera';
+  } else if (ua.includes('samsungbrowser')) {
+    browser = 'Samsung';
+  } else if (ua.includes('brave')) {
+    browser = 'Brave';
+  } else if (ua.includes('vivaldi')) {
+    browser = 'Vivaldi';
+  } else if (ua.includes('arc/')) {
+    browser = 'Arc';
+  } else if (ua.includes('duckduckgo') || ua.includes('ddg/')) {
+    browser = 'DuckDuckGo';
+  } else if (ua.includes('yabrowser')) {
+    browser = 'Yandex';
+  } else if (ua.includes('ucbrowser') || ua.includes('ubrowser')) {
+    browser = 'UC Browser';
   } else if (ua.includes('firefox') || ua.includes('fxios')) {
     browser = 'Firefox';
+  } else if (ua.includes('chrome') || ua.includes('chromium') || ua.includes('crios')) {
+    browser = 'Chrome';
   } else if (ua.includes('safari')) {
-    // Safari UA always includes "safari"; Chrome/Edge UAs also include it,
-    // so only assign Safari when Chrome/Edge were not matched above.
     browser = 'Safari';
+  } else if (ua.includes('curl/')) {
+    browser = 'Curl';
+  } else if (ua.includes('postman')) {
+    browser = 'Postman';
   }
 
   // ── Tablet ────────────────────────────────────────────────────────────────
@@ -55,6 +70,9 @@ export function parseDevice(userAgent: string): DeviceInfo {
     // Android tablet omits the "Mobile" token
     return { type: 'tablet', key: 'tablet', os: 'Android', browser };
   }
+  if (ua.includes('tablet') || ua.includes('playbook') || ua.includes('silk')) {
+    return { type: 'tablet', key: 'tablet', os: ua.includes('android') ? 'Android' : 'unknown', browser };
+  }
 
   // ── Mobile ────────────────────────────────────────────────────────────────
   if (ua.includes('iphone') || ua.includes('ipod')) {
@@ -64,14 +82,26 @@ export function parseDevice(userAgent: string): DeviceInfo {
     return { type: 'mobile', key: 'android', os: 'Android', browser };
   }
   if (ua.includes('mobile') || ua.includes('blackberry') || ua.includes('windows phone')) {
-    return { type: 'mobile', key: 'mobile', os: 'unknown', browser };
+    let osName = 'unknown';
+    if (ua.includes('windows phone')) osName = 'Windows';
+    else if (ua.includes('android')) osName = 'Android';
+    else if (ua.includes('iphone') || ua.includes('ios')) osName = 'iOS';
+    return { type: 'mobile', key: 'mobile', os: osName, browser };
   }
 
   // ── Desktop ───────────────────────────────────────────────────────────────
-  if (ua.includes('windows')) {
+  if (
+    ua.includes('windows nt') ||
+    ua.includes('windows') ||
+    ua.includes('win64') ||
+    ua.includes('wow64')
+  ) {
     return { type: 'desktop', key: 'windows', os: 'Windows', browser };
   }
-  if (ua.includes('macintosh') || ua.includes('mac os x')) {
+  if (ua.includes('cros')) {
+    return { type: 'desktop', key: 'linux', os: 'ChromeOS', browser };
+  }
+  if (ua.includes('macintosh') || ua.includes('mac os x') || ua.includes('macos')) {
     return { type: 'desktop', key: 'mac', os: 'macOS', browser };
   }
   if (ua.includes('linux') || ua.includes('x11')) {
@@ -123,24 +153,43 @@ export function resolveGeoTarget(
 export const REGION_COUNTRIES: Record<string, string[]> = {
   europe: [
     "FR", "DE", "GB", "ES", "IT", "BE", "CH", "PT", "NL", "SE",
-    "NO", "DK", "FI", "IE", "AT", "PL", "GR", "RO", "CZ", "HU", "LU"
+    "NO", "DK", "FI", "IE", "AT", "PL", "GR", "RO", "CZ", "HU", "LU",
+    "MC", "IS", "HR", "RS", "BG", "SK", "SI", "LT", "LV", "EE", "CY", "MT", "UA", "RU", "TR", "GE", "AM", "AZ"
   ],
   west_africa: [
     "SN", "CI", "BF", "ML", "GN", "TG", "BJ", "NE", "NG", "GH",
-    "CV", "GM", "GW", "LR", "SL"
+    "CV", "GM", "GW", "LR", "SL", "MR"
   ],
   central_africa: [
-    "CM", "GA", "CG", "CD", "TD", "CF", "GQ", "ST"
+    "CM", "GA", "CG", "CD", "TD", "CF", "GQ", "ST", "BI", "RW"
+  ],
+  north_africa: [
+    "MA", "DZ", "TN", "EG", "LY", "SD", "MR"
+  ],
+  east_africa: [
+    "KE", "UG", "TZ", "RW", "BI", "ET", "SO", "DJ", "ER", "SS", "MG", "MU", "SC", "KM"
+  ],
+  southern_africa: [
+    "ZA", "AO", "MZ", "ZM", "ZW", "BW", "NA", "LS", "SZ", "MW"
+  ],
+  africa: [
+    "BF", "CI", "SN", "CM", "ML", "NE", "TG", "BJ", "GH", "NG", "GN", "GA", "CD", "CG", "TD", "CF", "RW", "BI", "KE", "TZ", "UG", "ET", "MG", "ZA", "MA", "DZ", "TN", "EG", "AO", "MZ", "ZM", "ZW", "MR", "GW", "SL", "LR", "CV", "ST", "GQ", "SO", "DJ", "ER", "SS", "SD", "LY", "MW", "BW", "NA", "LS", "SZ", "KM", "SC", "MU"
   ],
   north_america: [
-    "US", "CA", "MX"
+    "US", "CA", "MX", "HT", "DO", "CU", "PA", "CR", "JM"
   ],
   south_america: [
     "BR", "AR", "CO", "CL", "PE", "VE", "EC", "BO", "PY", "UY"
   ],
   asia: [
     "CN", "JP", "KR", "IN", "SG", "TH", "VN", "ID", "MY", "PH",
-    "PK", "BD", "AE", "SA", "QA", "KW"
+    "PK", "BD", "AE", "SA", "QA", "KW", "OM", "BH", "JO", "LB", "IQ", "IL", "LK", "KZ", "UZ", "TM", "KG", "TJ", "AF", "YE"
+  ],
+  middle_east: [
+    "AE", "SA", "QA", "KW", "OM", "BH", "IL", "JO", "LB", "IQ", "YE", "TR", "IR", "SY"
+  ],
+  oceania: [
+    "AU", "NZ", "FJ", "PG", "NC", "PF"
   ],
 };
 
@@ -187,6 +236,9 @@ export function evaluateStructuredRoutingRules(
       let match = false;
       if (type === 'country' || type === 'pays') {
         match = upperCountry.toLowerCase() === val;
+      } else if (type === 'continent' || type === 'region') {
+        const regionList = REGION_COUNTRIES[val] || [];
+        match = regionList.includes(upperCountry);
       } else if (type === 'city') {
         match = lowerCity === val;
       } else if (type === 'device' || type === 'appareil') {
@@ -211,7 +263,7 @@ export function evaluateStructuredRoutingRules(
 
       if (condType === 'pays') {
         isMatch = upperCountry.toLowerCase() === condVal;
-      } else if (condType === 'region') {
+      } else if (condType === 'continent' || condType === 'region') {
         const regionList = REGION_COUNTRIES[condVal] || [];
         isMatch = regionList.includes(upperCountry);
       } else if (condType === 'appareil') {
@@ -237,6 +289,25 @@ export function evaluateStructuredRoutingRules(
           isMatch = lowerOs === 'linux' || lowerKey === 'linux';
         } else {
           isMatch = lowerOs === condVal;
+        }
+      } else if (condType === 'navigateur' || condType === 'browser') {
+        const lowerBrowser = (device?.browser || '').toLowerCase();
+        if (condVal === 'chrome') {
+          isMatch = lowerBrowser === 'chrome';
+        } else if (condVal === 'safari') {
+          isMatch = lowerBrowser === 'safari';
+        } else if (condVal === 'firefox') {
+          isMatch = lowerBrowser === 'firefox';
+        } else if (condVal === 'edge') {
+          isMatch = lowerBrowser === 'edge';
+        } else if (condVal === 'opera') {
+          isMatch = lowerBrowser === 'opera';
+        } else if (condVal === 'brave') {
+          isMatch = lowerBrowser === 'brave';
+        } else if (condVal === 'samsung') {
+          isMatch = lowerBrowser === 'samsung';
+        } else {
+          isMatch = lowerBrowser === condVal;
         }
       } else {
         isMatch = true;

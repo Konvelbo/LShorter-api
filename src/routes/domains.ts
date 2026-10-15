@@ -181,7 +181,7 @@ domains.delete('/:id', async (c) => {
   return ok({ deleted: true, id, domain_name: row.domain_name });
 });
 
-// ─── POST /api/v1/domains/:id/verify  (trigger re-check) ─────────────────────
+// ─── POST /api/v1/domains/:id/verify  (trigger real DoH DNS check) ───────────
 domains.post('/:id/verify', async (c) => {
   const { userId } = c.get('auth');
   const id = c.req.param('id');
@@ -192,16 +192,64 @@ domains.post('/:id/verify', async (c) => {
 
   if (!row) return err('Domain not found or forbidden', 404, 'NOT_FOUND');
 
-  // In production: query Cloudflare for SaaS status and update accordingly.
-  // Here we return the current status and instructions.
-  return ok({
-    id:     row.id,
-    domain_name: row.domain_name,
-    status: row.status,
-    message: row.status === 'active'
-      ? 'Domain is active and serving traffic.'
-      : 'Domain is still pending. Ensure DNS records are configured and wait for propagation.',
-  });
+  const cleanDomain = row.domain_name.trim().toLowerCase();
+  const expectedTxtHost = `_lshorter-verify.${cleanDomain}`;
+  const expectedTxtValue = `lshorter-verify=${row.id}`;
+
+  try {
+    const [txtRes, rootTxtRes, cnameRes] = await Promise.all([
+      fetch(`https://cloudflare-dns.com/dns-query?name=${encodeURIComponent(expectedTxtHost)}&type=TXT`, {
+        headers: { Accept: 'application/dns-json' },
+      }).then((r) => (r.ok ? r.json() : null)).catch(() => null),
+      fetch(`https://cloudflare-dns.com/dns-query?name=${encodeURIComponent(cleanDomain)}&type=TXT`, {
+        headers: { Accept: 'application/dns-json' },
+      }).then((r) => (r.ok ? r.json() : null)).catch(() => null),
+      fetch(`https://cloudflare-dns.com/dns-query?name=${encodeURIComponent(cleanDomain)}&type=CNAME`, {
+        headers: { Accept: 'application/dns-json' },
+      }).then((r) => (r.ok ? r.json() : null)).catch(() => null),
+    ]);
+
+    const txtAnswers = [
+      ...((txtRes as any)?.Answer || []),
+      ...((rootTxtRes as any)?.Answer || []),
+    ]
+      .filter((a: any) => a.type === 16)
+      .map((a: any) => String(a.data || '').replace(/^"+|"+$/g, '').trim());
+
+    const cnameAnswers = ((cnameRes as any)?.Answer || [])
+      .filter((a: any) => a.type === 5)
+      .map((a: any) => String(a.data || '').trim().toLowerCase().replace(/\.$/, ''));
+
+    const txtVerified = txtAnswers.some((v: string) => v.includes('lshorter-verify='));
+    const cnameVerified = cnameAnswers.some(
+      (v: string) => v.includes('lshorter') || v.includes('lsho.cc') || v.includes('workers.dev')
+    );
+
+    if (txtVerified || cnameVerified) {
+      await c.env.DB.prepare(`UPDATE custom_domains SET status = 'active' WHERE id = ? AND user_id = ?`)
+        .bind(id, userId)
+        .run();
+      return ok({
+        id: row.id,
+        domain_name: row.domain_name,
+        verified: true,
+        status: 'active',
+        message: 'Domain ownership verified via live DNS records. Domain is now active.',
+      });
+    }
+
+    return c.json(
+      {
+        success: false,
+        verified: false,
+        status: 'pending',
+        error: `DNS verification failed for ${cleanDomain}. Missing TXT record (${expectedTxtHost} = ${expectedTxtValue}) or CNAME record (${cleanDomain} -> cname.lshorter.cc).`,
+      },
+      422
+    );
+  } catch (e) {
+    return err('Failed to query DNS resolver for domain verification', 502, 'DNS_LOOKUP_FAILED');
+  }
 });
 
 export default domains;

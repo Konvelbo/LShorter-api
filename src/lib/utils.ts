@@ -100,3 +100,21 @@ export function monthBucket(): string {
   const d = new Date();
   return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`;
 }
+
+const frDisplayNames = typeof Intl !== 'undefined' && Intl.DisplayNames
+  ? new Intl.DisplayNames(['fr'], { type: 'region' })
+  : null;
+
+/**
+ * Resolves standard ISO country code (e.g. 'BF', 'FR', 'US') to full official French name.
+ * Fallback to country code or 'Inconnu'.
+ */
+export function getCountryName(countryCode: string | null | undefined): string {
+  if (!countryCode || countryCode === 'XX' || countryCode === 'UNKNOWN') return 'Inconnu';
+  const clean = countryCode.toUpperCase().trim();
+  try {
+    const name = frDisplayNames?.of(clean);
+    if (name && name !== clean) return name;
+  } catch {}
+  return clean;
+}
