@@ -38,3 +38,4 @@ privateReadme.md
 # test artifacts
 coverage/
 __tests__/
+.playwright-cli/
