@@ -66,6 +66,7 @@ export interface CreateLinkOptions {
   pathLockPrefix?:  string;
   pathLockMessage?: string;
   pathLockPassword?: string;
+  pixels?:          string[];
 }
 
 export interface LinkResponse {
@@ -87,6 +88,8 @@ export interface LinkResponse {
   hasPassword?:      boolean;
   has_password?:     number | boolean;
   tags?:             string[] | null;
+  pixels?:           string[] | null;
+  pixel_ids?:        string[] | null;
   isCloaked?:        boolean;
   is_cloaked?:       number | boolean;
   hideReferrer?:     boolean;
@@ -507,6 +510,114 @@ class DomainsModule {
   }
 }
 
+// ─── Module: Webhooks ────────────────────────────────────────────────────────
+
+export interface WebhookResponse {
+  id: string;
+  userId?: string;
+  url: string;
+  events: string[];
+  secretKey: string;
+  isActive: boolean;
+  lastTriggeredAt?: string | null;
+  lastStatus?: number | null;
+  createdAt: string;
+}
+
+export interface UpdateWebhookOptions {
+  url?: string;
+  events?: string[];
+  secretKey?: string;
+  isActive?: boolean;
+}
+
+class WebhooksModule {
+  constructor(private readonly http: HttpClient) {}
+
+  /**
+   * Webhook creation via SDK is disabled.
+   * Webhooks must be created and configured securely from the LShorter Dashboard (Paramètres > Webhooks).
+   */
+  create(): never {
+    throw new QuickLinkError(
+      "Creating webhooks via the SDK is disabled. Please configure your webhooks from the LShorter Dashboard (Settings > Webhooks).",
+      403
+    );
+  }
+
+  async list(): Promise<WebhookResponse[]> {
+    const res = await this.http.get<{ webhooks: WebhookResponse[] }>('/api/v1/webhooks');
+    return res.webhooks || (Array.isArray(res) ? res : []);
+  }
+
+  async get(id: string): Promise<WebhookResponse> {
+    const res = await this.http.get<{ webhook: WebhookResponse }>(`/api/v1/webhooks/${id}`);
+    return res.webhook || (res as unknown as WebhookResponse);
+  }
+
+  async update(id: string, options: UpdateWebhookOptions): Promise<WebhookResponse> {
+    const res = await this.http.patch<{ webhook: WebhookResponse }>(`/api/v1/webhooks/${id}`, options);
+    return res.webhook || (res as unknown as WebhookResponse);
+  }
+
+  delete(id: string): Promise<{ deleted: boolean }> {
+    return this.http.delete(`/api/v1/webhooks/${id}`);
+  }
+}
+
+// ─── Module: Pixels ──────────────────────────────────────────────────────────
+
+export interface PixelResponse {
+  id: string;
+  userId?: string;
+  platform: 'meta' | 'google' | 'tiktok' | 'linkedin' | string;
+  pixelId: string;
+  name: string;
+  isActive: boolean;
+  eventsTrackedCount?: number;
+  createdAt: string;
+}
+
+export interface UpdatePixelOptions {
+  name?: string;
+  pixelId?: string;
+  isActive?: boolean;
+}
+
+class PixelsModule {
+  constructor(private readonly http: HttpClient) {}
+
+  /**
+   * Retargeting pixel creation via SDK is disabled.
+   * Pixels must be registered from the LShorter Dashboard (Paramètres > Pixels de Retargeting).
+   */
+  create(): never {
+    throw new QuickLinkError(
+      "Creating retargeting pixels via the SDK is disabled. Please register your pixels from the LShorter Dashboard (Settings > Retargeting Pixels).",
+      403
+    );
+  }
+
+  async list(): Promise<PixelResponse[]> {
+    const res = await this.http.get<{ pixels: PixelResponse[] }>('/api/v1/pixels');
+    return res.pixels || (Array.isArray(res) ? res : []);
+  }
+
+  async get(id: string): Promise<PixelResponse> {
+    const res = await this.http.get<{ pixel: PixelResponse }>(`/api/v1/pixels/${id}`);
+    return res.pixel || (res as unknown as PixelResponse);
+  }
+
+  async update(id: string, options: UpdatePixelOptions): Promise<PixelResponse> {
+    const res = await this.http.patch<{ pixel: PixelResponse }>(`/api/v1/pixels/${id}`, options);
+    return res.pixel || (res as unknown as PixelResponse);
+  }
+
+  delete(id: string): Promise<{ deleted: boolean }> {
+    return this.http.delete(`/api/v1/pixels/${id}`);
+  }
+}
+
 // ─── Main SDK Class ───────────────────────────────────────────────────────────
 
 /**
@@ -531,6 +642,8 @@ export class LShorter {
   public readonly track:     TrackModule;
   public readonly analytics: AnalyticsModule;
   public readonly domains:   DomainsModule;
+  public readonly webhooks:  WebhooksModule;
+  public readonly pixels:    PixelsModule;
 
   private readonly http: HttpClient;
 
@@ -540,6 +653,8 @@ export class LShorter {
     this.track     = new TrackModule(this.http);
     this.analytics = new AnalyticsModule(this.http);
     this.domains   = new DomainsModule(this.http);
+    this.webhooks  = new WebhooksModule(this.http);
+    this.pixels    = new PixelsModule(this.http);
   }
 }
 

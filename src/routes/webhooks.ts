@@ -80,6 +80,15 @@ webhooks.get("/", async (c) => {
 // ─── POST /api/v1/webhooks (Create a new webhook) ────────────────────────────
 webhooks.post("/", async (c) => {
   const auth = c.get("auth");
+  const isInternal = auth?.keyId === "internal" || Boolean(c.req.header("X-Frontend-Secret"));
+  if (!isInternal) {
+    return err(
+      "La création de webhooks via le SDK ou la clé API est désactivée. Veuillez configurer vos webhooks depuis le tableau de bord LShorter.",
+      403,
+      "FORBIDDEN_SDK_CREATE",
+    );
+  }
+
   const qUserId = c.req.query("userId") || c.req.header("X-User-Id");
   let body: any = {};
   try {

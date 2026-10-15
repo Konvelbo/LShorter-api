@@ -635,6 +635,9 @@ links.post(
     );
     const finalIsActive = isNewLinkExpired ? 0 : (isActive !== false ? 1 : 0);
 
+    const rawPixels = (parsed.data as any).pixels ?? (parsed.data as any).pixel_ids ?? (parsed.data as any).pixelIds;
+    const cleanPixels = Array.isArray(rawPixels) ? rawPixels.map(String) : null;
+
     let inserted = false;
     while (!inserted && attempts < maxAttempts) {
       attempts++;
@@ -648,8 +651,9 @@ links.post(
               ab_variations, main_weight, redirect_type, pass_params,
               max_clicks, fallback_url, password_plain,
               path_lock_mode, path_lock_prefix, path_lock_message, path_lock_password,
+              pixels,
               created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         )
           .bind(
             linkId,
@@ -686,6 +690,7 @@ links.post(
             finalPathLockPrefix,
             finalPathLockMessage,
             finalPathLockPassword,
+            cleanPixels ? JSON.stringify(cleanPixels) : null,
             now(),
             now(),
           )
@@ -745,6 +750,8 @@ links.post(
         path_lock_message: finalPathLockMessage,
         pathLockPassword: finalPathLockPassword,
         path_lock_password: finalPathLockPassword,
+        pixels: cleanPixels,
+        pixel_ids: cleanPixels,
       });
       const kvPutPromise = c.env.URL_KV.put(
         `link:${resolvedDomain}:${finalSlug}`,
@@ -800,6 +807,8 @@ links.post(
           pathLockPassword: finalPathLockPassword,
           path_lock_password: finalPathLockPassword,
           tags: tags ?? null,
+          pixels: cleanPixels || [],
+          pixel_ids: cleanPixels || [],
           isCloaked: finalIsCloaked,
           hideReferrer: hideReferrer ?? false,
           metaTitle: metaTitle ?? null,
@@ -1216,6 +1225,16 @@ links.patch("/:id", async (c) => {
     setParts.push("password_plain = ?");
     bindings.push(updates.password || null);
   }
+  const rawPatchPixels = (updates as any).pixels !== undefined
+    ? (updates as any).pixels
+    : (updates as any).pixel_ids !== undefined
+    ? (updates as any).pixel_ids
+    : (updates as any).pixelIds;
+  if (rawPatchPixels !== undefined) {
+    const cleanPixels = Array.isArray(rawPatchPixels) ? rawPatchPixels.map(String) : null;
+    setParts.push("pixels = ?");
+    bindings.push(cleanPixels ? JSON.stringify(cleanPixels) : null);
+  }
 
   bindings.push(id);
   await c.env.DB.prepare(`UPDATE links SET ${setParts.join(", ")} WHERE id = ?`)
@@ -1242,6 +1261,9 @@ links.patch("/:id", async (c) => {
   const parsedUpdatedAb = updated?.ab_variations
     ? JSON.parse(updated.ab_variations)
     : null;
+  const parsedUpdatedPixels = updated?.pixels
+    ? (typeof updated.pixels === "string" ? JSON.parse(updated.pixels) : updated.pixels)
+    : [];
 
   // Invalidate old & new KV cache keys across all domain variations
   const purgeKeys = [
@@ -1319,6 +1341,8 @@ links.patch("/:id", async (c) => {
           path_lock_message: updated.path_lock_message || null,
           pathLockPassword: updated.path_lock_password || null,
           path_lock_password: updated.path_lock_password || null,
+          pixels: parsedUpdatedPixels,
+          pixel_ids: parsedUpdatedPixels,
         }),
         { expirationTtl: 86400 * 30 },
       ).catch(() => {});
@@ -1365,6 +1389,8 @@ links.patch("/:id", async (c) => {
       updated?.pass_params !== undefined ? Boolean(updated.pass_params) : true,
     pathLockPassword: updated?.path_lock_password || null,
     path_lock_password: updated?.path_lock_password || null,
+    pixels: parsedUpdatedPixels,
+    pixel_ids: parsedUpdatedPixels,
     bannerStyle: resolvedUpdatedBanner.bannerStyle,
     banner_style: resolvedUpdatedBanner.bannerStyle,
     twitterCard: resolvedUpdatedBanner.twitterCard,
@@ -1407,6 +1433,7 @@ links.get("/", async (c) => {
               ab_variations, main_weight, redirect_type, pass_params,
               max_clicks, fallback_url, password_plain,
               path_lock_mode, path_lock_prefix, path_lock_message, path_lock_password,
+              pixels,
               (CASE WHEN password_hash IS NOT NULL OR password_plain IS NOT NULL THEN 1 ELSE 0 END) as has_password,
               created_at
        FROM links WHERE ${whereClause}
@@ -1424,6 +1451,7 @@ links.get("/", async (c) => {
               og_title, og_description, og_image,
               max_clicks, fallback_url, password_plain,
               path_lock_mode, path_lock_prefix, path_lock_message, path_lock_password,
+              pixels,
               (CASE WHEN password_hash IS NOT NULL OR password_plain IS NOT NULL THEN 1 ELSE 0 END) as has_password,
               created_at
        FROM links WHERE ${whereClause}
@@ -1518,6 +1546,12 @@ links.get("/", async (c) => {
         banner_style: resolvedBanner.bannerStyle,
         twitterCard: resolvedBanner.twitterCard,
         twitter_card: resolvedBanner.twitterCard,
+        pixels: (row as any).pixels
+          ? (typeof (row as any).pixels === "string" ? JSON.parse((row as any).pixels) : (row as any).pixels)
+          : [],
+        pixel_ids: (row as any).pixels
+          ? (typeof (row as any).pixels === "string" ? JSON.parse((row as any).pixels) : (row as any).pixels)
+          : [],
         shortUrl: `https://${row.domain_name || "lsho.cc"}/${row.slug}`,
       };
     }),
@@ -1630,6 +1664,12 @@ links.get("/:id", async (c) => {
     banner_style: resolvedBanner.bannerStyle,
     twitterCard: resolvedBanner.twitterCard,
     twitter_card: resolvedBanner.twitterCard,
+    pixels: link["pixels"]
+      ? (typeof link["pixels"] === "string" ? JSON.parse(link["pixels"]) : link["pixels"])
+      : [],
+    pixel_ids: link["pixels"]
+      ? (typeof link["pixels"] === "string" ? JSON.parse(link["pixels"]) : link["pixels"])
+      : [],
     isActive: (Boolean(link["expires_at"]) && new Date(link["expires_at"]).getTime() <= Date.now()) ? false : (link["is_active"] !== undefined ? Boolean(link["is_active"]) : true),
     is_active: (Boolean(link["expires_at"]) && new Date(link["expires_at"]).getTime() <= Date.now()) ? 0 : (link["is_active"] !== undefined ? Number(link["is_active"]) : 1),
     status: (Boolean(link["expires_at"]) && new Date(link["expires_at"]).getTime() <= Date.now()) ? "expired" : (link["is_active"] === 0 || link["is_active"] === false) ? "paused" : "active",
