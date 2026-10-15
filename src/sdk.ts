@@ -33,28 +33,79 @@ export interface QuickLinkConfig {
 
 // ── Links ──────────────────────────────────────────────────────────────────────
 
+export interface AbVariation {
+  url:    string;
+  weight: number;
+}
+
 export interface CreateLinkOptions {
-  targetUrl:       string;
-  slug?:           string;
-  domainName?:     string;
-  geoTargeting?:   Record<string, string>;
+  targetUrl:        string;
+  slug?:            string;
+  domainName?:      string;
+  geoTargeting?:    Record<string, string>;
   deviceTargeting?: Partial<Record<DeviceKey, string>>;
-  isActive?:       boolean;
-  expiresAt?:      string;
+  isActive?:        boolean;
+  expiresAt?:       string;
+  password?:        string;
+  tags?:            string[];
+  isCloaked?:       boolean;
+  hideReferrer?:    boolean;
+  metaTitle?:       string;
+  ogTitle?:         string;
+  ogDescription?:   string;
+  ogImage?:         string;
+  bannerStyle?:     'default_banner' | 'large_banner';
+  twitterCard?:     'summary' | 'summary_large_image';
+  abVariations?:    AbVariation[];
+  mainWeight?:      number;
+  redirectType?:    '301' | '302' | '307' | '308';
+  passParams?:      boolean;
+  maxClicks?:       number;
+  fallbackUrl?:     string;
+  pathLockMode?:    'off' | 'strict' | 'funnel';
+  pathLockPrefix?:  string;
+  pathLockMessage?: string;
+  pathLockPassword?: string;
 }
 
 export interface LinkResponse {
-  id:              string;
-  shortUrl:        string;
-  slug:            string;
-  domain:          string;
-  targetUrl:       string;
-  geoTargeting:    Record<string, string> | null;
-  deviceTargeting: Partial<Record<DeviceKey, string>> | null;
-  isActive:        boolean;
-  expiresAt:       string | null;
-  clicks:          number;
-  created_at:      string;
+  id:                string;
+  shortUrl:          string;
+  slug:              string;
+  domain?:           string;
+  domain_name?:      string;
+  targetUrl:         string;
+  target_url?:       string;
+  geoTargeting?:     Record<string, string> | null;
+  deviceTargeting?:  Partial<Record<DeviceKey, string>> | null;
+  isActive:          boolean;
+  is_active?:        number | boolean;
+  status?:           'active' | 'paused' | 'expired';
+  expiresAt?:        string | null;
+  clicks?:           number;
+  clicks_count?:     number;
+  hasPassword?:      boolean;
+  has_password?:     number | boolean;
+  tags?:             string[] | null;
+  isCloaked?:        boolean;
+  is_cloaked?:       number | boolean;
+  hideReferrer?:     boolean;
+  hide_referrer?:    number | boolean;
+  metaTitle?:        string | null;
+  ogTitle?:          string | null;
+  ogDescription?:    string | null;
+  ogImage?:          string | null;
+  bannerStyle?:      string | null;
+  twitterCard?:      string | null;
+  abVariations?:     AbVariation[] | null;
+  mainWeight?:       number | null;
+  redirectType?:     string | null;
+  passParams?:       boolean;
+  maxClicks?:        number | null;
+  fallbackUrl?:      string | null;
+  pathLockMode?:     string | null;
+  pathLockPassword?: string | null;
+  created_at:        string;
 }
 
 export interface ListLinksOptions {
