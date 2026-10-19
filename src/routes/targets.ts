@@ -223,9 +223,7 @@ targets.post("/", async (c) => {
       const isProParam = userPlanParam === "PRO" || userPlanParam === "BUSINESS" || userPlanParam === "ENTERPRISE";
       let hasProPlan = false;
 
-      if (isInternal && isProParam) {
-        hasProPlan = true;
-      } else if (c.env.DB) {
+      if (c.env.DB) {
         const dbUser = await c.env.DB.prepare(
           "SELECT plan FROM users WHERE id = ? OR email = ? LIMIT 1"
         )
@@ -233,8 +231,14 @@ targets.post("/", async (c) => {
           .first<{ plan: string }>()
           .catch(() => null);
 
-        const dbPlan = (dbUser?.plan || "").toUpperCase();
-        hasProPlan = dbPlan === "PRO" || dbPlan === "BUSINESS" || dbPlan === "ENTERPRISE";
+        if (dbUser) {
+          const dbPlan = (dbUser.plan || "").toUpperCase();
+          hasProPlan = dbPlan === "PRO" || dbPlan === "BUSINESS" || dbPlan === "ENTERPRISE";
+        } else if (isInternal && isProParam) {
+          hasProPlan = true;
+        }
+      } else if (isInternal && isProParam) {
+        hasProPlan = true;
       }
 
       if (!hasProPlan) {

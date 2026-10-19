@@ -136,9 +136,13 @@ export const authMiddleware: MiddlewareHandler<{
       ).run();
     } catch {}
 
-    c.executionCtx.waitUntil(
-      c.env.URL_KV.put(kvAuthKey, JSON.stringify({ plan: activeRequestedPlan, email: finalEmail, name: finalName }), { expirationTtl: 3600 }).catch(() => {})
-    );
+    try {
+      c.executionCtx.waitUntil(
+        c.env.URL_KV.put(kvAuthKey, JSON.stringify({ plan: activeRequestedPlan, email: finalEmail, name: finalName }), { expirationTtl: 3600 }).catch(() => {})
+      );
+    } catch {
+      c.env.URL_KV.put(kvAuthKey, JSON.stringify({ plan: activeRequestedPlan, email: finalEmail, name: finalName }), { expirationTtl: 3600 }).catch?.(() => {});
+    }
 
     userAuthCache.set(finalUserId, {
       plan: activeRequestedPlan,
@@ -189,11 +193,17 @@ export const authMiddleware: MiddlewareHandler<{
   });
 
   // 4. Asynchronously update last_used_at (fire and forget)
-  c.executionCtx.waitUntil(
+  try {
+    c.executionCtx.waitUntil(
+      c.env.DB.prepare(
+        `UPDATE api_keys SET last_used_at = ? WHERE id = ?`
+      ).bind(now(), row.keyId).run()
+    );
+  } catch {
     c.env.DB.prepare(
       `UPDATE api_keys SET last_used_at = ? WHERE id = ?`
-    ).bind(now(), row.keyId).run()
-  );
+    ).bind(now(), row.keyId).run().catch?.(() => {});
+  }
 
   return next();
 };
