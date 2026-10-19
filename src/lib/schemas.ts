@@ -283,11 +283,19 @@ export type UpdateWebhookInput = z.infer<typeof UpdateWebhookSchema>;
 // ─── Target Alerts (Notifications Dashboard) ──────────────────────────────────
 
 export const CreateTargetAlertSchema = z.object({
+  id: z.string().optional().nullable(),
+  userId: z.string().optional().nullable(),
+  userEmail: z.string().optional().nullable(),
+  userPlan: z.string().optional().nullable(),
+  plan: z.string().optional().nullable(),
   linkId: z.string().optional().nullable(),
-  metricType: z.enum(["clicks", "revenue"]).default("clicks").optional(),
+  title: z.string().max(120).optional().nullable(),
+  metricType: z.enum(["clicks", "revenue", "both"]).default("clicks").optional(),
   period: z.enum(["day", "week", "month"]).default("month").optional(),
-  targetValue: z.number().positive(),
-  notifyExpired: z.boolean().default(true).optional(),
+  targetValue: z.number().positive().optional(),
+  clicksTargetValue: z.number().positive().optional(),
+  revenueTargetValue: z.number().positive().optional(),
+  notifyExpired: z.boolean().default(false).optional(),
   notifyEmail: z.boolean().default(true).optional(),
   notifyBell: z.boolean().default(true).optional(),
   status: z.enum(["active", "paused", "reached"]).default("active").optional(),
@@ -296,9 +304,12 @@ export const CreateTargetAlertSchema = z.object({
 export type CreateTargetAlertInput = z.infer<typeof CreateTargetAlertSchema>;
 
 export const UpdateTargetAlertSchema = z.object({
-  metricType: z.enum(["clicks", "revenue"]).optional(),
+  title: z.string().max(120).optional().nullable(),
+  metricType: z.enum(["clicks", "revenue", "both"]).optional(),
   period: z.enum(["day", "week", "month"]).optional(),
   targetValue: z.number().positive().optional(),
+  clicksTargetValue: z.number().positive().optional(),
+  revenueTargetValue: z.number().positive().optional(),
   notifyExpired: z.boolean().optional(),
   notifyEmail: z.boolean().optional(),
   notifyBell: z.boolean().optional(),

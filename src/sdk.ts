@@ -618,6 +618,65 @@ class PixelsModule {
   }
 }
 
+// ─── Module: Notifications & Target Alerts ────────────────────────────────────
+
+export interface TargetAlertResponse {
+  id: string;
+  userId?: string;
+  linkId?: string | null;
+  linkTitle?: string | null;
+  slug?: string | null;
+  targetUrl?: string | null;
+  metricType: 'clicks' | 'revenue';
+  period: 'day' | 'week' | 'month';
+  targetValue: number;
+  currentValue: number;
+  notifyExpired: boolean;
+  notifyEmail: boolean;
+  notifyBell: boolean;
+  status: 'active' | 'paused' | 'reached';
+  lastNotifiedAt?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+class NotificationsModule {
+  constructor(private readonly http: HttpClient) {}
+
+  /**
+   * Creating target alerts and notifications via the SDK is disabled.
+   * Notifications and performance alerts must be configured directly from the LShorter Dashboard (Paramètres > Notifications).
+   */
+  create(): never {
+    throw new QuickLinkError(
+      "Creating target alerts and notifications via the SDK is disabled. Notifications must be configured directly from the LShorter Dashboard (Settings > Notifications).",
+      403
+    );
+  }
+
+  /**
+   * Creating target alerts and notifications via the SDK is disabled.
+   */
+  createTarget(): never {
+    throw new QuickLinkError(
+      "Creating target alerts and notifications via the SDK is disabled. Notifications must be configured directly from the LShorter Dashboard (Settings > Notifications).",
+      403
+    );
+  }
+
+  async list(): Promise<TargetAlertResponse[]> {
+    const res = await this.http.get<TargetAlertResponse[]>('/api/v1/targets');
+    return Array.isArray(res) ? res : ((res as any)?.data || []);
+  }
+
+  async get(id: string): Promise<TargetAlertResponse> {
+    const alerts = await this.list();
+    const found = alerts.find((a) => a.id === id);
+    if (!found) throw new QuickLinkError("Target alert not found", 404);
+    return found;
+  }
+}
+
 // ─── Main SDK Class ───────────────────────────────────────────────────────────
 
 /**
@@ -638,23 +697,27 @@ class PixelsModule {
  * });
  */
 export class LShorter {
-  public readonly links:     LinksModule;
-  public readonly track:     TrackModule;
-  public readonly analytics: AnalyticsModule;
-  public readonly domains:   DomainsModule;
-  public readonly webhooks:  WebhooksModule;
-  public readonly pixels:    PixelsModule;
+  public readonly links:         LinksModule;
+  public readonly track:         TrackModule;
+  public readonly analytics:     AnalyticsModule;
+  public readonly domains:       DomainsModule;
+  public readonly webhooks:      WebhooksModule;
+  public readonly pixels:        PixelsModule;
+  public readonly notifications: NotificationsModule;
+  public readonly targets:       NotificationsModule;
 
   private readonly http: HttpClient;
 
   constructor(config: QuickLinkConfig) {
-    this.http      = new HttpClient(config);
-    this.links     = new LinksModule(this.http);
-    this.track     = new TrackModule(this.http);
-    this.analytics = new AnalyticsModule(this.http);
-    this.domains   = new DomainsModule(this.http);
-    this.webhooks  = new WebhooksModule(this.http);
-    this.pixels    = new PixelsModule(this.http);
+    this.http          = new HttpClient(config);
+    this.links         = new LinksModule(this.http);
+    this.track         = new TrackModule(this.http);
+    this.analytics     = new AnalyticsModule(this.http);
+    this.domains       = new DomainsModule(this.http);
+    this.webhooks      = new WebhooksModule(this.http);
+    this.pixels        = new PixelsModule(this.http);
+    this.notifications = new NotificationsModule(this.http);
+    this.targets       = this.notifications;
   }
 }
 
