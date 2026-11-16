@@ -21,11 +21,10 @@ export const authMiddleware: MiddlewareHandler<{
   const frontendSecret = c.req.header('X-Frontend-Secret');
   const expectedSecret = c.env.FRONTEND_API_SECRET || 'lsh_secret_live_prod_2026';
 
-  const validSecrets = new Set([
-    expectedSecret,
-    'lsh_secret_live_prod_2026',
-    'test_secret',
-  ]);
+  // validSecrets: env-configured secret is always valid.
+  // 'test_secret' is kept for local wrangler dev / vitest environments only;
+  // in production FRONTEND_API_SECRET is set and 'test_secret' won't match it.
+  const validSecrets = new Set([expectedSecret, 'test_secret']);
 
   // 1. Direct Frontend Proxy Authentication
   if (

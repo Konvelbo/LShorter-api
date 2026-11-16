@@ -53,9 +53,13 @@ export function computePlanOverage(plan: Plan, clicksThisMonth: number) {
     };
   }
   const overageClicks = Math.max(0, clicksThisMonth - spec.clicks);
+  // Math.floor: only COMPLETED batches trigger a charge.
+  // Pro: 200,000 total (50,000 over 150k) = 1 batch = $3.
+  //      200,001 total (50,001 over 150k) = still 1 batch = $3  (2nd batch not yet complete)
+  //      250,000 total (100,000 over 150k) = 2 batches = $6.
   const batches =
     !spec.overageUnlimited && spec.overageBatchSize > 0 && overageClicks > 0
-      ? Math.ceil(overageClicks / spec.overageBatchSize)
+      ? Math.floor(overageClicks / spec.overageBatchSize)
       : 0;
   const estimatedCost =
     !spec.overageUnlimited && batches > 0
