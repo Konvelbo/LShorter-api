@@ -256,12 +256,14 @@ function cloakedPage(destination: string, title: string | null, slug: string = '
   const mode = link?.pathLockMode || link?.path_lock_mode || 'off';
   const isPathLocked = mode !== 'off';
   const safePrefix = escapeHtml(link?.pathLockPrefix || link?.path_lock_prefix || '');
+  const cleanPrefix = safePrefix.replace(/^\/+/, '').replace(/\/+$/, '');
+  const authorizedPath = cleanPrefix || safeSlug;
   const safeMessage = escapeHtml(
     link?.pathLockMessage ||
     link?.path_lock_message ||
     (mode === 'strict'
-      ? 'Le propriétaire de ce lien a restreint la navigation à cette page unique.'
-      : 'Le propriétaire de ce lien a restreint la navigation au tunnel d\\\'accès autorisé.')
+      ? 'Le propriétaire de ce lien a restreint la navigation à cette page unique. Toute navigation externe est bloquée.'
+      : 'Le propriétaire de ce lien a restreint la navigation au tunnel d\'accès autorisé. Toute navigation externe est verrouillée.')
   );
   const safePassword = escapeHtml(link?.pathLockPassword || link?.path_lock_password || '');
 
@@ -274,81 +276,147 @@ function cloakedPage(destination: string, title: string | null, slug: string = '
   <title>${safeTitle}</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
-    html, body { height: 100%; overflow: hidden; background: #09090b; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; color: #fff; }
-    
-    /* Topbar - Ergonomic & Compact (34px height) */
+    html, body { height: 100%; overflow: hidden; background: #0B0C0E; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; color: #F5F6F8; }
+    button { font-family: inherit; cursor: pointer; }
+
+    /* Topbar - Modern Glassmorphism (64px) */
     #topbar {
       position: fixed; top: 0; left: 0; right: 0;
-      height: 34px; background: #141418; border-bottom: 1px solid #222226;
+      height: 64px; background: rgba(11, 12, 14, 0.92);
+      backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
+      border-bottom: 1px solid rgba(255, 255, 255, 0.08);
       display: flex; align-items: center; justify-content: space-between;
-      padding: 0 12px; z-index: 999;
+      padding: 0 24px; z-index: 1000;
       transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1);
-      box-shadow: 0 1px 4px rgba(0,0,0,0.5);
     }
     #topbar.hidden-bar {
       transform: translateY(-100%);
       pointer-events: none;
     }
-    .tb-left { display: flex; align-items: center; gap: 8px; min-width: 0; }
-    .tb-logo { width: 18px; height: 18px; border-radius: 4px; background: #f97316; display: flex; align-items: center; justify-content: center; font-weight: 900; font-size: 9px; color: #fff; flex-shrink: 0; }
-    .tb-slug { font-family: monospace; font-size: 11.5px; font-weight: 600; color: #f4f4f5; }
-    .tb-badge { font-size: 9.5px; font-weight: 700; padding: 1.5px 6px; border-radius: 4px; border: 1px solid; display: inline-flex; align-items: center; gap: 3px; line-height: 1.2; }
-    .tb-badge.locked { background: rgba(16, 185, 129, 0.1); border-color: rgba(16, 185, 129, 0.25); color: #34d399; }
-    .tb-badge.unlocked { background: rgba(16, 185, 129, 0.2); border-color: rgba(16, 185, 129, 0.5); color: #10b981; }
-    
-    .tb-right { display: flex; align-items: center; gap: 6px; }
-    .tb-btn { background: #222226; color: #d4d4d8; border: 1px solid #333338; border-radius: 5px; padding: 2.5px 8px; font-size: 10.5px; font-weight: 600; cursor: pointer; transition: all 0.15s; text-decoration: none; }
-    .tb-btn:hover { background: #333338; color: #fff; }
-    .tb-btn-orange { background: rgba(249, 115, 22, 0.12); color: #fb923c; border-color: rgba(249, 115, 22, 0.28); }
-    .tb-btn-orange:hover { background: rgba(249, 115, 22, 0.22); color: #fff; }
+    .tb-left { display: flex; align-items: center; gap: 12px; min-width: 0; }
+    .tb-icon { width: 36px; height: 36px; border-radius: 10px; background: #2563EB; display: flex; align-items: center; justify-content: center; color: #fff; flex-shrink: 0; box-shadow: 0 4px 12px rgba(37, 99, 235, 0.25); }
+    .tb-slug { font-size: 16px; font-weight: 700; color: #fff; letter-spacing: -0.01em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 260px; }
+    .tb-badge { display: inline-flex; align-items: center; height: 28px; padding: 0 12px; border-radius: 999px; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); font-size: 12px; font-weight: 600; color: #A9C4FF; white-space: nowrap; }
+    .tb-badge.unlocked { background: rgba(16, 185, 129, 0.12); border-color: rgba(16, 185, 129, 0.35); color: #34d399; }
 
-    /* Restore Floating Pill: Fixed, Top Center, z-index 1000 */
+    .tb-right { display: flex; align-items: center; gap: 8px; }
+    .btn-ghost { display: inline-flex; align-items: center; gap: 8px; height: 40px; padding: 0 14px; border-radius: 10px; border: 1px solid rgba(255,255,255,0.1); background: transparent; color: #D5D9E2; font-size: 14px; font-weight: 500; transition: all 0.15s; }
+    .btn-ghost:hover { background: rgba(255,255,255,0.07); color: #fff; }
+    .btn-icon { width: 40px; height: 40px; padding: 0; justify-content: center; }
+
+    /* Restore Floating Pill: Fixed Top Center with high z-index 99999 */
     #restore-pill {
-      position: fixed; top: 10px; left: 50%; transform: translateX(-50%);
-      background: rgba(20, 20, 24, 0.95); backdrop-filter: blur(10px);
-      border: 1px solid rgba(255, 255, 255, 0.15); border-radius: 9999px;
-      padding: 4px 12px; font-size: 11px; font-weight: 600; color: #e4e4e7;
-      display: none; align-items: center; gap: 6px; cursor: pointer;
-      z-index: 1000; box-shadow: 0 4px 16px rgba(0,0,0,0.6);
+      position: fixed; top: 12px; left: 50%; transform: translateX(-50%);
+      height: 40px; padding: 0 16px; border-radius: 9999px;
+      background: rgba(11, 12, 14, 0.95); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6);
+      display: none; align-items: center; gap: 10px; cursor: pointer;
+      z-index: 99999; font-size: 13px; font-weight: 600; color: #F5F6F8;
       transition: all 0.2s ease;
     }
-    #restore-pill:hover { border-color: #f97316; color: #fff; transform: translateX(-50%) translateY(-1px); }
+    #restore-pill:hover { border-color: #3b82f6; transform: translateX(-50%) scale(1.04); }
+    .pill-icon { width: 22px; height: 22px; border-radius: 9999px; background: #2563EB; display: flex; align-items: center; justify-content: center; color: #fff; }
 
-    /* Iframe Container: 100% full screen with zero black bar */
+    /* Iframe Container */
     #iframe-container {
       position: fixed; inset: 0; width: 100%; height: 100%;
-      padding-top: 34px; background: #fff;
+      padding-top: 64px; background: #0B0C0E;
       transition: padding-top 0.25s cubic-bezier(0.16, 1, 0.3, 1);
     }
-    #iframe-container.full-height {
-      padding-top: 0 !important;
-    }
+    #iframe-container.full-height { padding-top: 0 !important; }
     iframe { width: 100%; height: 100%; border: none; display: block; background: #fff; }
 
-    /* Blocking Gate */
+    /* Blocking Gate Overlay */
     #blocking-gate {
-      position: absolute; inset: 0; background: rgba(9, 9, 12, 0.96); backdrop-filter: blur(12px);
+      position: absolute; inset: 0; background: #0B0C0E;
       display: none; flex-direction: column; align-items: center; justify-content: center;
-      padding: 24px; text-align: center; z-index: 99;
+      padding: 32px 20px; text-align: center; z-index: 999; overflow-y: auto;
     }
-    .gate-shield { width: 64px; height: 64px; border-radius: 12px; background: rgba(249, 115, 22, 0.1); border: 1px solid rgba(249, 115, 22, 0.35); display: flex; align-items: center; justify-content: center; font-size: 28px; margin-bottom: 16px; }
-    .gate-tag { display: inline-flex; align-items: center; gap: 6px; padding: 4px 12px; border-radius: 6px; background: rgba(239, 68, 68, 0.12); border: 1px solid rgba(239, 68, 68, 0.3); color: #f87171; font-size: 11px; font-weight: 700; text-transform: uppercase; margin-bottom: 12px; }
-    .gate-title { font-size: 22px; font-weight: 900; margin-bottom: 8px; max-width: 480px; }
-    .gate-desc { font-size: 13px; color: #a1a1aa; max-width: 440px; line-height: 1.5; margin-bottom: 20px; }
-    .gate-btn { padding: 10px 20px; border-radius: 8px; background: #f97316; color: #fff; font-weight: 700; font-size: 13px; border: none; cursor: pointer; text-decoration: none; box-shadow: 0 4px 14px rgba(249, 115, 22, 0.35); transition: background 0.2s; }
-    .gate-btn:hover { background: #ea580c; }
+    .gate-glows { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
+    .gate-glow-1 { position: absolute; left: 15%; top: 15%; width: 560px; height: 72px; border-radius: 18px; background: rgba(255,255,255,0.08); filter: blur(20px); }
+    .gate-glow-2 { position: absolute; right: 10%; top: 12%; width: 340px; height: 220px; border-radius: 24px; background: rgba(255,255,255,0.06); filter: blur(24px); }
+    .gate-glow-3 { position: absolute; left: 15%; top: 45%; width: 330px; height: 210px; border-radius: 24px; background: rgba(255,255,255,0.05); filter: blur(24px); }
+    .gate-glow-4 { position: absolute; right: 10%; top: 45%; width: 330px; height: 210px; border-radius: 24px; background: rgba(255,255,255,0.05); filter: blur(24px); }
+    .gate-glow-center { position: absolute; left: 35%; top: 25%; width: 520px; height: 520px; border-radius: 50%; background: rgba(37,99,235,0.08); filter: blur(120px); }
+    .gate-overlay { position: absolute; inset: 0; background: rgba(9,10,12,0.55); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); pointer-events: none; }
 
-    /* Dev Bypass Form */
-    .dev-bypass-box { margin-top: 20px; background: #141418; border: 1px solid #27272a; border-radius: 8px; padding: 14px; width: 100%; max-width: 360px; text-align: left; }
-    .dev-title { font-size: 11px; font-weight: 700; color: #f4f4f5; display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
-    .dev-input-wrap { position: relative; margin-bottom: 8px; }
-    .dev-input { width: 100%; height: 34px; background: #09090b; border: 1px solid #27272a; border-radius: 6px; padding: 0 32px 0 10px; color: #fff; font-size: 12px; outline: none; }
-    .dev-input:focus { border-color: #f97316; }
-    .eye-toggle { position: absolute; right: 8px; top: 50%; transform: translateY(-50%); background: none; border: none; color: #71717a; cursor: pointer; font-size: 14px; padding: 2px; }
+    .gate-card {
+      position: relative; z-index: 10; width: 100%; max-width: 460px;
+      padding: 40px 36px; box-sizing: border-box; border-radius: 24px;
+      background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.12);
+      backdrop-filter: blur(28px); -webkit-backdrop-filter: blur(28px);
+      box-shadow: 0 24px 64px rgba(0,0,0,0.35); display: flex; flex-direction: column; align-items: center; text-align: center;
+      margin: auto;
+    }
+    .gate-icon-badge {
+      width: 64px; height: 64px; border-radius: 18px;
+      background: rgba(37,99,235,0.14); border: 1px solid rgba(96,140,255,0.35);
+      color: #8DB0FF; display: flex; align-items: center; justify-content: center;
+    }
+    .gate-pill {
+      display: inline-flex; align-items: center; gap: 8px; margin-top: 24px;
+      height: 30px; padding: 0 14px; border-radius: 999px;
+      background: rgba(37,99,235,0.14); border: 1px solid rgba(96,140,255,0.35);
+      color: #A9C4FF; font-size: 12px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase;
+    }
+    .gate-title {
+      margin: 16px 0 0; font-size: 28px; line-height: 1.2; font-weight: 700;
+      letter-spacing: -0.02em; color: #fff;
+    }
+    .gate-slug {
+      margin: 12px 0 0; font-size: 15px; font-weight: 600; line-height: 1.5; color: #A9AFBA;
+    }
+    .gate-desc-box {
+      width: 100%; box-sizing: border-box; margin-top: 14px; padding: 12px 16px;
+      border-radius: 12px; background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.1);
+      font-size: 13.5px; line-height: 1.5; color: #D5D9E2; text-align: center; word-break: break-word;
+    }
+    .gate-perimeter {
+      width: 100%; box-sizing: border-box; margin-top: 24px; height: 52px; padding: 0 16px;
+      display: flex; align-items: center; justify-content: center; gap: 10px;
+      border-radius: 12px; background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.1);
+    }
+    .gate-perimeter span { font-size: 14px; color: #A9AFBA; }
+    .gate-perimeter code {
+      font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace; font-size: 14px; font-weight: 600;
+      color: #A9C4FF; padding: 4px 10px; border-radius: 8px; background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.1);
+    }
+    .btn-primary {
+      width: 100%; margin-top: 16px; height: 52px; display: flex; align-items: center; justify-content: center;
+      gap: 10px; border: none; border-radius: 12px; background: #2563EB; color: #FFFFFF; font-size: 16px; font-weight: 600;
+      box-shadow: 0 8px 24px rgba(37,99,235,0.35); transition: all 0.2s;
+    }
+    .btn-primary:hover { filter: brightness(1.1); transform: translateY(-1px); }
+    .btn-primary:active { transform: translateY(0); }
+    .gate-divider { width: 100%; height: 1px; margin-top: 28px; background: rgba(255,255,255,0.1); }
+
+    /* Dev Unlock Form */
+    .dev-box { width: 100%; margin-top: 24px; display: flex; flex-direction: column; gap: 14px; text-align: left; }
+    .dev-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+    .dev-header-left { display: inline-flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 600; color: #fff; }
+    .dev-header-right { font-size: 12px; font-weight: 500; color: #A9AFBA; white-space: nowrap; }
+    .dev-input-wrap { position: relative; width: 100%; }
+    .dev-input {
+      width: 100%; box-sizing: border-box; height: 48px; padding: 0 52px 0 14px;
+      border-radius: 10px; border: 1px solid rgba(255,255,255,0.14); background: rgba(0,0,0,0.3);
+      color: #F5F6F8; font-family: inherit; font-size: 15px; outline: none; transition: border-color 0.15s;
+    }
+    .dev-input:focus { border-color: #2563EB; }
+    .eye-toggle {
+      position: absolute; top: 4px; right: 4px; width: 40px; height: 40px;
+      display: flex; align-items: center; justify-content: center; border: none; border-radius: 8px;
+      background: transparent; color: #A9AFBA; cursor: pointer; transition: color 0.15s;
+    }
     .eye-toggle:hover { color: #fff; }
-    .dev-submit-btn { width: 100%; padding: 8px; border-radius: 6px; background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.12); color: #fff; font-size: 11px; font-weight: 700; cursor: pointer; }
-    .dev-submit-btn:hover { background: rgba(255,255,255,0.15); }
-    .dev-err { color: #f87171; font-size: 11px; margin-bottom: 6px; }
+    .dev-btn {
+      width: 100%; height: 48px; border-radius: 10px; border: 1px solid rgba(141,176,255,0.4);
+      background: transparent; color: #A9C4FF; font-size: 15px; font-weight: 600; transition: background 0.15s;
+    }
+    .dev-btn:hover { background: rgba(255,255,255,0.06); }
+    .dev-err { color: #f87171; font-size: 12px; margin-top: -6px; }
+
+    .gate-footer { margin-top: 28px; font-size: 12px; color: #9096A3; text-align: center; }
   </style>
 </head>
 <body>
@@ -356,27 +424,36 @@ function cloakedPage(destination: string, title: string | null, slug: string = '
   <!-- Topbar -->
   <div id="topbar">
     <div class="tb-left">
-      <div class="tb-logo">LS</div>
-      <span class="tb-slug">/${safeSlug}</span>
+      <div class="tb-icon">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"></path></svg>
+      </div>
+      <span class="tb-slug">${safeTitle}</span>
       ${
         isPathLocked
-          ? `<span id="pathlock-badge" class="tb-badge locked">
-               <span>●</span>
-               <span id="badge-text">PathLock™ ${mode === 'strict' ? 'Mono-Page' : 'Funnel'}</span>
+          ? `<span id="pathlock-badge" class="tb-badge">
+               <span id="badge-text">PathLock™ ${mode === 'strict' ? 'Single-Page' : 'Funnel'}</span>
              </span>`
-          : ''
+          : `<span class="tb-badge" style="color:#A1A1AA;">Protégé</span>`
       }
     </div>
     <div class="tb-right">
-      <button type="button" class="tb-btn" onclick="restoreOriginalPage()">Page autorisée</button>
-      <button type="button" class="tb-btn tb-btn-orange" onclick="toggleTopbar()">Masquer ▲</button>
+      <button type="button" class="btn-ghost" onclick="reloadIframe()" title="Actualiser la page">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"></path><path d="M21 3v5h-5"></path><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"></path><path d="M8 16H3v5"></path></svg>
+        <span>Actualiser</span>
+      </button>
+      <button type="button" class="btn-ghost btn-icon" onclick="toggleTopbar()" title="Réduire la barre" aria-label="Réduire la barre">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m18 15-6-6-6 6"></path></svg>
+      </button>
     </div>
   </div>
 
-  <!-- Restore Floating Pill -->
-  <div id="restore-pill" onclick="toggleTopbar()">
-    <span style="color:#f97316;">LS</span>
-    <span>Afficher la barre ▼</span>
+  <!-- Restore Floating Pill (Appears when topbar is collapsed) -->
+  <div id="restore-pill" onclick="toggleTopbar()" title="Afficher la barre" aria-label="Afficher la barre">
+    <div class="pill-icon">
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"></path></svg>
+    </div>
+    <span>Afficher la barre</span>
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#8DB0FF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"></path></svg>
   </div>
 
   <!-- Iframe Container -->
@@ -385,29 +462,71 @@ function cloakedPage(destination: string, title: string | null, slug: string = '
 
     <!-- PathLock Security Blocking Gate -->
     <div id="blocking-gate">
-      <div class="gate-shield">🛡️</div>
-      <div class="gate-tag">🔒 Accès Hors Périmètre Bloqué</div>
-      <h2 class="gate-title">Navigation Restreinte par le Créateur du Lien</h2>
-      <p class="gate-desc">${safeMessage}</p>
+      <!-- Glows -->
+      <div class="gate-glows">
+        <div class="gate-glow-1"></div>
+        <div class="gate-glow-2"></div>
+        <div class="gate-glow-3"></div>
+        <div class="gate-glow-4"></div>
+        <div class="gate-glow-center"></div>
+      </div>
+      <div class="gate-overlay"></div>
 
-      <button type="button" class="gate-btn" onclick="restoreOriginalPage()">← Revenir à la page autorisée</button>
+      <!-- Main Modal Card -->
+      <div class="gate-card">
+        <div class="gate-icon-badge">
+          <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"></path><path d="M12 8v4"></path><path d="M12 16h.01"></path></svg>
+        </div>
 
-      ${
-        safePassword
-          ? `<div class="dev-bypass-box">
-               <div class="dev-title">
-                 <span>🔒 Déverrouillage Équipe / Développeur</span>
-                 <span style="color:#71717a; font-weight:normal;">Accès libre</span>
-               </div>
-               <div class="dev-input-wrap">
-                 <input type="password" id="dev-pass-input" class="dev-input" placeholder="Mot de passe..." onkeydown="if(event.key==='Enter') verifyDevPassword()">
-                 <button type="button" class="eye-toggle" onclick="toggleEye()">👁️</button>
-               </div>
-               <div id="dev-error" class="dev-err" style="display:none;">Mot de passe incorrect.</div>
-               <button type="button" class="dev-submit-btn" onclick="verifyDevPassword()">Déverrouiller l'accès complet</button>
-             </div>`
-          : ''
-      }
+        <div class="gate-pill">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="11" x="3" y="11" rx="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>
+          <span>ACCÈS HORS PÉRIMÈTRE BLOQUÉ</span>
+        </div>
+
+        <h1 class="gate-title">Navigation restreinte par le créateur du lien</h1>
+        <p class="gate-slug">${safeTitle}</p>
+
+        <!-- Description part -->
+        <div class="gate-desc-box">${safeMessage}</div>
+
+        <!-- Authorized perimeter box -->
+        <div class="gate-perimeter">
+          <span>Périmètre autorisé</span>
+          <code>/${authorizedPath}</code>
+        </div>
+
+        <!-- Return CTA button -->
+        <button type="button" class="btn-primary" onclick="restoreOriginalPage()">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"><path d="m12 19-7-7 7-7"></path><path d="M19 12H5"></path></svg>
+          <span>Revenir à la page autorisée</span>
+        </button>
+
+        <div class="gate-divider"></div>
+
+        ${
+          safePassword
+            ? `<div class="dev-box">
+                 <div class="dev-header">
+                   <span class="dev-header-left">
+                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#8DB0FF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="11" x="3" y="11" rx="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>
+                     <span>Déverrouillage équipe / développeur</span>
+                   </span>
+                   <span class="dev-header-right">Accès complet</span>
+                 </div>
+                 <div class="dev-input-wrap">
+                   <input type="password" id="unlock-pass" class="dev-input" placeholder="Mot de passe de déblocage…" onkeydown="if(event.key==='Enter') verifyDevPassword()">
+                   <button type="button" class="eye-toggle" onclick="toggleEye()" aria-label="Afficher le mot de passe">
+                     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0"></path><circle cx="12" cy="12" r="3"></circle></svg>
+                   </button>
+                 </div>
+                 <div id="dev-error" class="dev-err" style="display:none;">Mot de passe incorrect.</div>
+                 <button type="button" class="dev-btn" onclick="verifyDevPassword()">Déverrouiller l’accès complet</button>
+               </div>`
+            : ''
+        }
+
+        <p class="gate-footer">Sécurisé par LShorter Edge Gate • PathLock™ Engine</p>
+      </div>
     </div>
   </div>
 
@@ -432,7 +551,7 @@ function cloakedPage(destination: string, title: string | null, slug: string = '
       var text = document.getElementById("badge-text");
       if (badge && text) {
         badge.className = "tb-badge unlocked";
-        text.textContent = "🔓 Accés debloqué";
+        text.textContent = "🔓 Accès débloqué";
       }
     }
 
@@ -448,7 +567,14 @@ function cloakedPage(destination: string, title: string | null, slug: string = '
       } else {
         tb.classList.add("hidden-bar");
         container.classList.add("full-height");
-        pill.style.display = "flex";
+        pill.style.display = "inline-flex";
+      }
+    }
+
+    function reloadIframe() {
+      var frame = document.getElementById("main-iframe");
+      if (frame) {
+        frame.src = frame.src;
       }
     }
 
@@ -460,7 +586,7 @@ function cloakedPage(destination: string, title: string | null, slug: string = '
     }
 
     function verifyDevPassword() {
-      var input = document.getElementById("dev-pass-input");
+      var input = document.getElementById("unlock-pass");
       var err = document.getElementById("dev-error");
       if (!input) return;
       var val = input.value.trim();
@@ -475,10 +601,15 @@ function cloakedPage(destination: string, title: string | null, slug: string = '
     }
 
     function toggleEye() {
-      var input = document.getElementById("dev-pass-input");
+      var input = document.getElementById("unlock-pass");
       if (input) {
         input.type = input.type === "password" ? "text" : "password";
       }
+    }
+
+    function cleanRoute(p) {
+      if (!p) return "";
+      return p.split("/").filter(Boolean).join("/");
     }
 
     function checkPath(urlOrPath) {
@@ -489,8 +620,8 @@ function cloakedPage(destination: string, title: string | null, slug: string = '
           var u = new URL(urlOrPath);
           path = u.pathname;
         }
-        var cleanAttempt = path.replace(/^\\/+/, "").replace(/\\/+$/, "");
-        var cleanPrefix = lockPrefix.replace(/^\\/+/, "").replace(/\\/+$/, "");
+        var cleanAttempt = cleanRoute(path);
+        var cleanPrefix = cleanRoute(lockPrefix);
 
         if (lockMode === "strict") {
           if (cleanAttempt !== cleanPrefix) {
