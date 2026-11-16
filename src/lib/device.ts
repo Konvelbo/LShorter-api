@@ -152,9 +152,10 @@ export function resolveGeoTarget(
 
 export const REGION_COUNTRIES: Record<string, string[]> = {
   europe: [
-    "FR", "DE", "GB", "ES", "IT", "BE", "CH", "PT", "NL", "SE",
-    "NO", "DK", "FI", "IE", "AT", "PL", "GR", "RO", "CZ", "HU", "LU",
-    "MC", "IS", "HR", "RS", "BG", "SK", "SI", "LT", "LV", "EE", "CY", "MT", "UA", "RU", "TR", "GE", "AM", "AZ"
+    "AL", "AD", "AT", "AX", "BA", "BE", "BG", "BY", "CH", "CY", "CZ", "DE", "DK",
+    "EE", "ES", "FI", "FO", "FR", "GB", "GG", "GI", "GR", "HR", "HU", "IE", "IM",
+    "IS", "IT", "JE", "LI", "LT", "LU", "LV", "MC", "MD", "ME", "MK", "MT", "NL",
+    "NO", "PL", "PT", "RO", "RS", "RU", "SE", "SI", "SJ", "SK", "SM", "UA", "VA", "XK"
   ],
   west_africa: [
     "SN", "CI", "BF", "ML", "GN", "TG", "BJ", "NE", "NG", "GH",
@@ -173,24 +174,63 @@ export const REGION_COUNTRIES: Record<string, string[]> = {
     "ZA", "AO", "MZ", "ZM", "ZW", "BW", "NA", "LS", "SZ", "MW"
   ],
   africa: [
-    "BF", "CI", "SN", "CM", "ML", "NE", "TG", "BJ", "GH", "NG", "GN", "GA", "CD", "CG", "TD", "CF", "RW", "BI", "KE", "TZ", "UG", "ET", "MG", "ZA", "MA", "DZ", "TN", "EG", "AO", "MZ", "ZM", "ZW", "MR", "GW", "SL", "LR", "CV", "ST", "GQ", "SO", "DJ", "ER", "SS", "SD", "LY", "MW", "BW", "NA", "LS", "SZ", "KM", "SC", "MU"
+    "AO", "BF", "BI", "BJ", "BW", "CD", "CF", "CG", "CI", "CM", "CV", "DJ", "DZ",
+    "EG", "EH", "ER", "ET", "GA", "GH", "GM", "GN", "GQ", "GW", "KE", "KM", "LR",
+    "LS", "LY", "MA", "MG", "ML", "MR", "MU", "MW", "MZ", "NA", "NE", "NG", "RE",
+    "RW", "SC", "SD", "SH", "SL", "SN", "SO", "SS", "ST", "SZ", "TD", "TG", "TN",
+    "TZ", "UG", "YT", "ZA", "ZM", "ZW"
+  ],
+  afrique: [
+    "AO", "BF", "BI", "BJ", "BW", "CD", "CF", "CG", "CI", "CM", "CV", "DJ", "DZ",
+    "EG", "EH", "ER", "ET", "GA", "GH", "GM", "GN", "GQ", "GW", "KE", "KM", "LR",
+    "LS", "LY", "MA", "MG", "ML", "MR", "MU", "MW", "MZ", "NA", "NE", "NG", "RE",
+    "RW", "SC", "SD", "SH", "SL", "SN", "SO", "SS", "ST", "SZ", "TD", "TG", "TN",
+    "TZ", "UG", "YT", "ZA", "ZM", "ZW"
   ],
   north_america: [
-    "US", "CA", "MX", "HT", "DO", "CU", "PA", "CR", "JM"
+    "AG", "AI", "AW", "BB", "BL", "BM", "BQ", "BS", "BZ", "CA", "CR", "CU", "CW",
+    "DM", "DO", "GD", "GL", "GP", "GT", "HN", "HT", "JM", "KN", "KY", "LC", "MF",
+    "MQ", "MS", "MX", "NI", "PA", "PM", "PR", "SV", "SX", "TC", "TT", "US", "VC",
+    "VG", "VI"
+  ],
+  "amerique_du_nord": [
+    "AG", "AI", "AW", "BB", "BL", "BM", "BQ", "BS", "BZ", "CA", "CR", "CU", "CW",
+    "DM", "DO", "GD", "GL", "GP", "GT", "HN", "HT", "JM", "KN", "KY", "LC", "MF",
+    "MQ", "MS", "MX", "NI", "PA", "PM", "PR", "SV", "SX", "TC", "TT", "US", "VC",
+    "VG", "VI"
   ],
   south_america: [
-    "BR", "AR", "CO", "CL", "PE", "VE", "EC", "BO", "PY", "UY"
+    "AR", "BO", "BR", "CL", "CO", "EC", "FK", "GF", "GY", "PE", "PY", "SR", "UY", "VE"
+  ],
+  "amerique_du_sud": [
+    "AR", "BO", "BR", "CL", "CO", "EC", "FK", "GF", "GY", "PE", "PY", "SR", "UY", "VE"
   ],
   asia: [
-    "CN", "JP", "KR", "IN", "SG", "TH", "VN", "ID", "MY", "PH",
-    "PK", "BD", "AE", "SA", "QA", "KW", "OM", "BH", "JO", "LB", "IQ", "IL", "LK", "KZ", "UZ", "TM", "KG", "TJ", "AF", "YE"
+    "AE", "AF", "AM", "AZ", "BD", "BH", "BN", "BT", "CN", "GE", "HK", "ID", "IL", "IN",
+    "IQ", "IR", "JO", "JP", "KG", "KH", "KP", "KR", "KW", "KZ", "LA", "LB", "LK",
+    "MM", "MN", "MO", "MV", "MY", "NP", "OM", "PH", "PK", "PS", "QA", "SA", "SG",
+    "SY", "TH", "TJ", "TL", "TM", "TR", "TW", "UZ", "VN", "YE"
+  ],
+  asie: [
+    "AE", "AF", "AM", "AZ", "BD", "BH", "BN", "BT", "CN", "GE", "HK", "ID", "IL", "IN",
+    "IQ", "IR", "JO", "JP", "KG", "KH", "KP", "KR", "KW", "KZ", "LA", "LB", "LK",
+    "MM", "MN", "MO", "MV", "MY", "NP", "OM", "PH", "PK", "PS", "QA", "SA", "SG",
+    "SY", "TH", "TJ", "TL", "TM", "TR", "TW", "UZ", "VN", "YE"
   ],
   middle_east: [
-    "AE", "SA", "QA", "KW", "OM", "BH", "IL", "JO", "LB", "IQ", "YE", "TR", "IR", "SY"
+    "AE", "BH", "IL", "IQ", "IR", "JO", "KW", "LB", "OM", "PS", "QA", "SA", "SY", "TR", "YE"
   ],
   oceania: [
-    "AU", "NZ", "FJ", "PG", "NC", "PF"
+    "AS", "AU", "CK", "FJ", "FM", "GU", "KI", "MH", "MP", "NC", "NF", "NR", "NU", "NZ",
+    "PF", "PG", "PN", "PW", "SB", "TK", "TO", "TV", "UM", "VU", "WF", "WS"
   ],
+  oceanie: [
+    "AS", "AU", "CK", "FJ", "FM", "GU", "KI", "MH", "MP", "NC", "NF", "NR", "NU", "NZ",
+    "PF", "PG", "PN", "PW", "SB", "TK", "TO", "TV", "UM", "VU", "WF", "WS"
+  ],
+  antarctica: [
+    "AQ", "BV", "CC", "CX", "GS", "HM", "IO", "TF"
+  ]
 };
 
 /**
@@ -261,7 +301,7 @@ export function evaluateStructuredRoutingRules(
       const op = cond.operator || 'est';
       let isMatch = false;
 
-      if (condType === 'pays') {
+      if (condType === 'pays' || condType === 'country') {
         isMatch = upperCountry.toLowerCase() === condVal;
       } else if (condType === 'continent' || condType === 'region') {
         const regionList = REGION_COUNTRIES[condVal] || [];
@@ -313,7 +353,8 @@ export function evaluateStructuredRoutingRules(
         isMatch = true;
       }
 
-      const conditionResult = op === 'est' ? isMatch : !isMatch;
+      const isPositive = op === 'est' || op === 'is' || op === 'equals' || op === 'eq';
+      const conditionResult = isPositive ? isMatch : !isMatch;
       if (!conditionResult) {
         allConditionsMet = false;
         break;
