@@ -267,6 +267,11 @@ function cloakedPage(destination: string, title: string | null, slug: string = '
   );
   const safePassword = escapeHtml(link?.pathLockPassword || link?.path_lock_password || '');
 
+  let destOrigin = '';
+  try {
+    destOrigin = new URL(destination.startsWith('http') ? destination : `https://${destination}`).origin;
+  } catch {}
+
   const html = `<!DOCTYPE html>
 <html lang="fr" class="dark">
 <head>
@@ -274,23 +279,44 @@ function cloakedPage(destination: string, title: string | null, slug: string = '
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="robots" content="noindex, nofollow">
   <title>${safeTitle}</title>
+  ${destOrigin ? `<link rel="dns-prefetch" href="${destOrigin}">\n  <link rel="preconnect" href="${destOrigin}">` : ''}
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     html, body { height: 100%; overflow: hidden; background: #0B0C0E; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; color: #F5F6F8; }
     button { font-family: inherit; cursor: pointer; }
 
-    /* Topbar - Modern Glassmorphism (64px) */
+    /* Top Progress Bar for Instant Reload Feedback */
+    #reload-progress {
+      position: fixed; top: 0; left: 0; right: 0; height: 2.5px;
+      background: linear-gradient(90deg, #2563EB, #38BDF8, #60A5FA);
+      z-index: 10001; opacity: 0; transform: scaleX(0); transform-origin: left;
+      transition: transform 0.3s ease, opacity 0.2s ease;
+      pointer-events: none;
+    }
+    #reload-progress.loading {
+      opacity: 1; transform: scaleX(0.85);
+      animation: progressPulse 1s infinite alternate;
+    }
+    @keyframes progressPulse {
+      0% { opacity: 0.6; }
+      100% { opacity: 1; }
+    }
+
+    /* Topbar - Modern Glassmorphism with Smooth Landing-Navbar Animation */
     #topbar {
       position: fixed; top: 0; left: 0; right: 0;
-      height: 64px; background: rgba(11, 12, 14, 0.92);
+      height: 60px; background: rgba(11, 12, 14, 0.95);
       backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
       border-bottom: 1px solid rgba(255, 255, 255, 0.08);
       display: flex; align-items: center; justify-content: space-between;
-      padding: 0 24px; z-index: 1000;
-      transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+      padding: 0 20px; z-index: 1000;
+      transform: translateY(0); opacity: 1;
+      transition: transform 0.4s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+      will-change: transform, opacity;
     }
     #topbar.hidden-bar {
       transform: translateY(-100%);
+      opacity: 0;
       pointer-events: none;
     }
     .tb-left { display: flex; align-items: center; gap: 12px; min-width: 0; }
@@ -300,38 +326,61 @@ function cloakedPage(destination: string, title: string | null, slug: string = '
     .tb-badge.unlocked { background: rgba(16, 185, 129, 0.12); border-color: rgba(16, 185, 129, 0.35); color: #34d399; }
 
     .tb-right { display: flex; align-items: center; gap: 8px; }
-    .btn-ghost { display: inline-flex; align-items: center; gap: 8px; height: 40px; padding: 0 14px; border-radius: 10px; border: 1px solid rgba(255,255,255,0.1); background: transparent; color: #D5D9E2; font-size: 14px; font-weight: 500; transition: all 0.15s; }
+    .btn-ghost { display: inline-flex; align-items: center; gap: 8px; height: 38px; padding: 0 14px; border-radius: 10px; border: 1px solid rgba(255,255,255,0.1); background: transparent; color: #D5D9E2; font-size: 13.5px; font-weight: 500; transition: all 0.15s; }
     .btn-ghost:hover { background: rgba(255,255,255,0.07); color: #fff; }
-    .btn-icon { width: 40px; height: 40px; padding: 0; justify-content: center; }
+    .btn-icon { width: 38px; height: 38px; padding: 0; justify-content: center; }
 
-    /* Restore Floating Pill: Fixed Top Center with high z-index 99999 */
+    /* Restore Floating Pill: Smooth Slide-in with high z-index 99999 */
     #restore-pill {
-      position: fixed; top: 12px; left: 50%; transform: translateX(-50%);
-      height: 40px; padding: 0 16px; border-radius: 9999px;
+      position: fixed; top: 12px; left: 50%;
+      transform: translateX(-50%) translateY(-24px) scale(0.95);
+      height: 38px; padding: 0 16px; border-radius: 9999px;
       background: rgba(11, 12, 14, 0.95); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
       border: 1px solid rgba(255, 255, 255, 0.2);
       box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6);
-      display: none; align-items: center; gap: 10px; cursor: pointer;
+      display: flex; align-items: center; gap: 10px; cursor: pointer;
       z-index: 99999; font-size: 13px; font-weight: 600; color: #F5F6F8;
-      transition: all 0.2s ease;
+      opacity: 0; pointer-events: none;
+      transition: transform 0.4s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.4s cubic-bezier(0.16, 1, 0.3, 1), border-color 0.15s;
+      will-change: transform, opacity;
     }
-    #restore-pill:hover { border-color: #3b82f6; transform: translateX(-50%) scale(1.04); }
+    #restore-pill.visible-pill {
+      transform: translateX(-50%) translateY(0) scale(1);
+      opacity: 1;
+      pointer-events: auto;
+    }
+    #restore-pill:hover { border-color: #3b82f6; transform: translateX(-50%) translateY(0) scale(1.04); }
     .pill-icon { width: 22px; height: 22px; border-radius: 9999px; background: #2563EB; display: flex; align-items: center; justify-content: center; color: #fff; }
 
-    /* Iframe Container */
+    /* Iframe Container - Pure GPU Transform, Zero Reflow, Zero White Band */
     #iframe-container {
-      position: fixed; inset: 0; width: 100%; height: 100%;
-      padding-top: 64px; background: #0B0C0E;
-      transition: padding-top 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+      position: absolute; inset: 0; width: 100%; height: 100%;
+      background: #0B0C0E;
+      transform: translateY(60px);
+      transition: transform 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+      will-change: transform;
     }
-    #iframe-container.full-height { padding-top: 0 !important; }
-    iframe { width: 100%; height: 100%; border: none; display: block; background: #fff; }
+    #iframe-container.collapsed {
+      transform: translateY(0);
+    }
+    iframe {
+      width: 100%; height: 100%; border: none; display: block;
+      background: transparent;
+    }
+
+    .spin-icon {
+      animation: spin 0.75s linear infinite;
+    }
+    @keyframes spin {
+      from { transform: rotate(0deg); }
+      to { transform: rotate(360deg); }
+    }
 
     /* Blocking Gate Overlay */
     #blocking-gate {
-      position: absolute; inset: 0; background: #0B0C0E;
+      position: fixed; inset: 0; background: #0B0C0E;
       display: none; flex-direction: column; align-items: center; justify-content: center;
-      padding: 32px 20px; text-align: center; z-index: 999; overflow-y: auto;
+      padding: 16px; text-align: center; z-index: 10000; overflow-y: auto;
     }
     .gate-glows { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
     .gate-glow-1 { position: absolute; left: 15%; top: 15%; width: 560px; height: 72px; border-radius: 18px; background: rgba(255,255,255,0.08); filter: blur(20px); }
@@ -341,85 +390,102 @@ function cloakedPage(destination: string, title: string | null, slug: string = '
     .gate-glow-center { position: absolute; left: 35%; top: 25%; width: 520px; height: 520px; border-radius: 50%; background: rgba(37,99,235,0.08); filter: blur(120px); }
     .gate-overlay { position: absolute; inset: 0; background: rgba(9,10,12,0.55); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); pointer-events: none; }
 
+    /* Compact & Mobile Responsive Card: No background on mobile (<640px) */
     .gate-card {
-      position: relative; z-index: 10; width: 100%; max-width: 460px;
-      padding: 40px 36px; box-sizing: border-box; border-radius: 24px;
-      background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.12);
-      backdrop-filter: blur(28px); -webkit-backdrop-filter: blur(28px);
-      box-shadow: 0 24px 64px rgba(0,0,0,0.35); display: flex; flex-direction: column; align-items: center; text-align: center;
-      margin: auto;
+      position: relative; z-index: 10; width: 100%; max-width: 390px;
+      padding: 16px 10px; box-sizing: border-box; border-radius: 24px;
+      background: transparent; border: 1px solid transparent;
+      backdrop-filter: none; -webkit-backdrop-filter: none;
+      box-shadow: none; display: flex; flex-direction: column; align-items: center; text-align: center;
+      margin: auto; transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+    @media (min-width: 640px) {
+      .gate-card {
+        max-width: 420px;
+        padding: 30px 26px;
+        background: rgba(255,255,255,0.05);
+        border: 1px solid rgba(255,255,255,0.12);
+        backdrop-filter: blur(28px); -webkit-backdrop-filter: blur(28px);
+        box-shadow: 0 24px 64px rgba(0,0,0,0.35);
+      }
     }
     .gate-icon-badge {
-      width: 64px; height: 64px; border-radius: 18px;
+      width: 56px; height: 56px; border-radius: 16px;
       background: rgba(37,99,235,0.14); border: 1px solid rgba(96,140,255,0.35);
       color: #8DB0FF; display: flex; align-items: center; justify-content: center;
     }
     .gate-pill {
-      display: inline-flex; align-items: center; gap: 8px; margin-top: 24px;
-      height: 30px; padding: 0 14px; border-radius: 999px;
+      display: inline-flex; align-items: center; gap: 6px; margin-top: 18px;
+      height: 28px; padding: 0 12px; border-radius: 999px;
       background: rgba(37,99,235,0.14); border: 1px solid rgba(96,140,255,0.35);
-      color: #A9C4FF; font-size: 12px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase;
+      color: #A9C4FF; font-size: 11px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase;
     }
     .gate-title {
-      margin: 16px 0 0; font-size: 28px; line-height: 1.2; font-weight: 700;
-      letter-spacing: -0.02em; color: #fff;
+      margin: 14px 0 0; font-size: 21px; line-height: 1.25; font-weight: 700;
+      letter-spacing: -0.015em; color: #fff;
+    }
+    @media (min-width: 640px) {
+      .gate-title { font-size: 24px; }
     }
     .gate-slug {
-      margin: 12px 0 0; font-size: 15px; font-weight: 600; line-height: 1.5; color: #A9AFBA;
+      margin: 8px 0 0; font-size: 14px; font-weight: 600; line-height: 1.4; color: #A9AFBA;
     }
     .gate-desc-box {
-      width: 100%; box-sizing: border-box; margin-top: 14px; padding: 12px 16px;
+      width: 100%; box-sizing: border-box; margin-top: 12px; padding: 10px 14px;
       border-radius: 12px; background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.1);
-      font-size: 13.5px; line-height: 1.5; color: #D5D9E2; text-align: center; word-break: break-word;
+      font-size: 12.5px; line-height: 1.5; color: #D5D9E2; text-align: center; word-break: break-word;
     }
     .gate-perimeter {
-      width: 100%; box-sizing: border-box; margin-top: 24px; height: 52px; padding: 0 16px;
-      display: flex; align-items: center; justify-content: center; gap: 10px;
+      width: 100%; box-sizing: border-box; margin-top: 16px; height: 46px; padding: 0 14px;
+      display: flex; align-items: center; justify-content: center; gap: 8px;
       border-radius: 12px; background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.1);
     }
-    .gate-perimeter span { font-size: 14px; color: #A9AFBA; }
+    .gate-perimeter span { font-size: 13px; color: #A9AFBA; }
     .gate-perimeter code {
-      font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace; font-size: 14px; font-weight: 600;
-      color: #A9C4FF; padding: 4px 10px; border-radius: 8px; background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.1);
+      font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace; font-size: 13px; font-weight: 600;
+      color: #A9C4FF; padding: 3px 8px; border-radius: 6px; background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.1);
     }
     .btn-primary {
-      width: 100%; margin-top: 16px; height: 52px; display: flex; align-items: center; justify-content: center;
-      gap: 10px; border: none; border-radius: 12px; background: #2563EB; color: #FFFFFF; font-size: 16px; font-weight: 600;
-      box-shadow: 0 8px 24px rgba(37,99,235,0.35); transition: all 0.2s;
+      width: 100%; margin-top: 14px; height: 46px; display: flex; align-items: center; justify-content: center;
+      gap: 8px; border: none; border-radius: 12px; background: #2563EB; color: #FFFFFF; font-size: 14.5px; font-weight: 600;
+      box-shadow: 0 6px 20px rgba(37,99,235,0.35); transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
     }
     .btn-primary:hover { filter: brightness(1.1); transform: translateY(-1px); }
     .btn-primary:active { transform: translateY(0); }
-    .gate-divider { width: 100%; height: 1px; margin-top: 28px; background: rgba(255,255,255,0.1); }
+    .gate-divider { width: 100%; height: 1px; margin-top: 20px; background: rgba(255,255,255,0.1); }
 
     /* Dev Unlock Form */
-    .dev-box { width: 100%; margin-top: 24px; display: flex; flex-direction: column; gap: 14px; text-align: left; }
+    .dev-box { width: 100%; margin-top: 18px; display: flex; flex-direction: column; gap: 10px; text-align: left; }
     .dev-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-    .dev-header-left { display: inline-flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 600; color: #fff; }
-    .dev-header-right { font-size: 12px; font-weight: 500; color: #A9AFBA; white-space: nowrap; }
+    .dev-header-left { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 600; color: #fff; }
+    .dev-header-right { font-size: 11px; font-weight: 500; color: #A9AFBA; white-space: nowrap; }
     .dev-input-wrap { position: relative; width: 100%; }
     .dev-input {
-      width: 100%; box-sizing: border-box; height: 48px; padding: 0 52px 0 14px;
+      width: 100%; box-sizing: border-box; height: 42px; padding: 0 44px 0 12px;
       border-radius: 10px; border: 1px solid rgba(255,255,255,0.14); background: rgba(0,0,0,0.3);
-      color: #F5F6F8; font-family: inherit; font-size: 15px; outline: none; transition: border-color 0.15s;
+      color: #F5F6F8; font-family: inherit; font-size: 13.5px; outline: none; transition: border-color 0.15s;
     }
     .dev-input:focus { border-color: #2563EB; }
     .eye-toggle {
-      position: absolute; top: 4px; right: 4px; width: 40px; height: 40px;
+      position: absolute; top: 3px; right: 3px; width: 36px; height: 36px;
       display: flex; align-items: center; justify-content: center; border: none; border-radius: 8px;
       background: transparent; color: #A9AFBA; cursor: pointer; transition: color 0.15s;
     }
     .eye-toggle:hover { color: #fff; }
     .dev-btn {
-      width: 100%; height: 48px; border-radius: 10px; border: 1px solid rgba(141,176,255,0.4);
-      background: transparent; color: #A9C4FF; font-size: 15px; font-weight: 600; transition: background 0.15s;
+      width: 100%; height: 42px; border-radius: 10px; border: 1px solid rgba(141,176,255,0.4);
+      background: transparent; color: #A9C4FF; font-size: 13.5px; font-weight: 600; transition: background 0.15s;
     }
     .dev-btn:hover { background: rgba(255,255,255,0.06); }
-    .dev-err { color: #f87171; font-size: 12px; margin-top: -6px; }
+    .dev-err { color: #f87171; font-size: 11.5px; margin-top: -4px; }
 
-    .gate-footer { margin-top: 28px; font-size: 12px; color: #9096A3; text-align: center; }
+    .gate-footer { margin-top: 20px; font-size: 11px; color: #9096A3; text-align: center; }
   </style>
 </head>
 <body>
+
+  <!-- Top Progress Bar for Instant Reload Feedback -->
+  <div id="reload-progress"></div>
 
   <!-- Topbar -->
   <div id="topbar">
@@ -437,9 +503,9 @@ function cloakedPage(destination: string, title: string | null, slug: string = '
       }
     </div>
     <div class="tb-right">
-      <button type="button" class="btn-ghost" onclick="reloadIframe()" title="Actualiser la page">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"></path><path d="M21 3v5h-5"></path><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"></path><path d="M8 16H3v5"></path></svg>
-        <span>Actualiser</span>
+      <button type="button" id="btn-reload" class="btn-ghost" onclick="reloadIframe()" title="Actualiser la page">
+        <svg id="reload-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"></path><path d="M21 3v5h-5"></path><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"></path><path d="M8 16H3v5"></path></svg>
+        <span id="reload-text">Actualiser</span>
       </button>
       <button type="button" class="btn-ghost btn-icon" onclick="toggleTopbar()" title="Réduire la barre" aria-label="Réduire la barre">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m18 15-6-6-6 6"></path></svg>
@@ -456,77 +522,77 @@ function cloakedPage(destination: string, title: string | null, slug: string = '
     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#8DB0FF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"></path></svg>
   </div>
 
-  <!-- Iframe Container -->
+  <!-- Iframe Container - Pure GPU Transform, Zero Reflow, Zero White Band -->
   <div id="iframe-container">
     <iframe id="main-iframe" src="${safeDest}" sandbox="allow-forms allow-modals allow-pointer-lock allow-popups allow-same-origin allow-scripts allow-downloads"></iframe>
+  </div>
 
-    <!-- PathLock Security Blocking Gate -->
-    <div id="blocking-gate">
-      <!-- Glows -->
-      <div class="gate-glows">
-        <div class="gate-glow-1"></div>
-        <div class="gate-glow-2"></div>
-        <div class="gate-glow-3"></div>
-        <div class="gate-glow-4"></div>
-        <div class="gate-glow-center"></div>
+  <!-- PathLock Security Blocking Gate (Direct Child of Body, Full-Screen Overlay) -->
+  <div id="blocking-gate">
+    <!-- Glows -->
+    <div class="gate-glows">
+      <div class="gate-glow-1"></div>
+      <div class="gate-glow-2"></div>
+      <div class="gate-glow-3"></div>
+      <div class="gate-glow-4"></div>
+      <div class="gate-glow-center"></div>
+    </div>
+    <div class="gate-overlay"></div>
+
+    <!-- Main Modal Card -->
+    <div class="gate-card">
+      <div class="gate-icon-badge">
+        <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"></path><path d="M12 8v4"></path><path d="M12 16h.01"></path></svg>
       </div>
-      <div class="gate-overlay"></div>
 
-      <!-- Main Modal Card -->
-      <div class="gate-card">
-        <div class="gate-icon-badge">
-          <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"></path><path d="M12 8v4"></path><path d="M12 16h.01"></path></svg>
-        </div>
-
-        <div class="gate-pill">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="11" x="3" y="11" rx="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>
-          <span>ACCÈS HORS PÉRIMÈTRE BLOQUÉ</span>
-        </div>
-
-        <h1 class="gate-title">Navigation restreinte par le créateur du lien</h1>
-        <p class="gate-slug">${safeTitle}</p>
-
-        <!-- Description part -->
-        <div class="gate-desc-box">${safeMessage}</div>
-
-        <!-- Authorized perimeter box -->
-        <div class="gate-perimeter">
-          <span>Périmètre autorisé</span>
-          <code>/${authorizedPath}</code>
-        </div>
-
-        <!-- Return CTA button -->
-        <button type="button" class="btn-primary" onclick="restoreOriginalPage()">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"><path d="m12 19-7-7 7-7"></path><path d="M19 12H5"></path></svg>
-          <span>Revenir à la page autorisée</span>
-        </button>
-
-        <div class="gate-divider"></div>
-
-        ${
-          safePassword
-            ? `<div class="dev-box">
-                 <div class="dev-header">
-                   <span class="dev-header-left">
-                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#8DB0FF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="11" x="3" y="11" rx="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>
-                     <span>Déverrouillage équipe / développeur</span>
-                   </span>
-                   <span class="dev-header-right">Accès complet</span>
-                 </div>
-                 <div class="dev-input-wrap">
-                   <input type="password" id="unlock-pass" class="dev-input" placeholder="Mot de passe de déblocage…" onkeydown="if(event.key==='Enter') verifyDevPassword()">
-                   <button type="button" class="eye-toggle" onclick="toggleEye()" aria-label="Afficher le mot de passe">
-                     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0"></path><circle cx="12" cy="12" r="3"></circle></svg>
-                   </button>
-                 </div>
-                 <div id="dev-error" class="dev-err" style="display:none;">Mot de passe incorrect.</div>
-                 <button type="button" class="dev-btn" onclick="verifyDevPassword()">Déverrouiller l’accès complet</button>
-               </div>`
-            : ''
-        }
-
-        <p class="gate-footer">Sécurisé par LShorter Edge Gate • PathLock™ Engine</p>
+      <div class="gate-pill">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="11" x="3" y="11" rx="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>
+        <span>ACCÈS HORS PÉRIMÈTRE BLOQUÉ</span>
       </div>
+
+      <h1 class="gate-title">Navigation restreinte par le créateur du lien</h1>
+      <p class="gate-slug">${safeTitle}</p>
+
+      <!-- Description part -->
+      <div class="gate-desc-box">${safeMessage}</div>
+
+      <!-- Authorized perimeter box -->
+      <div class="gate-perimeter">
+        <span>Périmètre autorisé</span>
+        <code>/${authorizedPath}</code>
+      </div>
+
+      <!-- Return CTA button -->
+      <button type="button" class="btn-primary" onclick="restoreOriginalPage()">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"><path d="m12 19-7-7 7-7"></path><path d="M19 12H5"></path></svg>
+        <span>Revenir à la page autorisée</span>
+      </button>
+
+      <div class="gate-divider"></div>
+
+      ${
+        safePassword
+          ? `<div class="dev-box">
+               <div class="dev-header">
+                 <span class="dev-header-left">
+                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#8DB0FF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="11" x="3" y="11" rx="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>
+                   <span>Déverrouillage équipe / développeur</span>
+                 </span>
+                 <span class="dev-header-right">Accès complet</span>
+               </div>
+               <div class="dev-input-wrap">
+                 <input type="password" id="unlock-pass" class="dev-input" placeholder="Mot de passe de déblocage…" onkeydown="if(event.key==='Enter') verifyDevPassword()">
+                 <button type="button" class="eye-toggle" onclick="toggleEye()" aria-label="Afficher le mot de passe">
+                   <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0"></path><circle cx="12" cy="12" r="3"></circle></svg>
+                 </button>
+               </div>
+               <div id="dev-error" class="dev-err" style="display:none;">Mot de passe incorrect.</div>
+               <button type="button" class="dev-btn" onclick="verifyDevPassword()">Déverrouiller l’accès complet</button>
+             </div>`
+          : ''
+      }
+
+      <p class="gate-footer">Sécurisé par LShorter Edge Gate • PathLock™ Engine</p>
     </div>
   </div>
 
@@ -562,17 +628,34 @@ function cloakedPage(destination: string, title: string | null, slug: string = '
       var isHidden = tb.classList.contains("hidden-bar");
       if (isHidden) {
         tb.classList.remove("hidden-bar");
-        container.classList.remove("full-height");
-        pill.style.display = "none";
+        container.classList.remove("collapsed");
+        pill.classList.remove("visible-pill");
       } else {
         tb.classList.add("hidden-bar");
-        container.classList.add("full-height");
-        pill.style.display = "inline-flex";
+        container.classList.add("collapsed");
+        pill.classList.add("visible-pill");
       }
     }
 
     function reloadIframe() {
       var frame = document.getElementById("main-iframe");
+      var icon = document.getElementById("reload-icon");
+      var text = document.getElementById("reload-text");
+      var prog = document.getElementById("reload-progress");
+      if (icon) icon.classList.add("spin-icon");
+      if (text) text.textContent = "Actualisation…";
+      if (prog) {
+        prog.style.transform = "scaleX(0.75)";
+        prog.classList.add("loading");
+      }
+
+      try {
+        if (frame && frame.contentWindow && frame.contentWindow.location) {
+          frame.contentWindow.location.reload();
+          return;
+        }
+      } catch(e) {}
+
       if (frame) {
         frame.src = frame.src;
       }
@@ -581,8 +664,19 @@ function cloakedPage(destination: string, title: string | null, slug: string = '
     function restoreOriginalPage() {
       var gate = document.getElementById("blocking-gate");
       var frame = document.getElementById("main-iframe");
+      var icon = document.getElementById("reload-icon");
+      var text = document.getElementById("reload-text");
+      var prog = document.getElementById("reload-progress");
+      if (icon) icon.classList.add("spin-icon");
+      if (text) text.textContent = "Actualisation…";
+      if (prog) {
+        prog.style.transform = "scaleX(0.75)";
+        prog.classList.add("loading");
+      }
       gate.style.display = "none";
-      frame.src = targetUrl;
+      if (frame) {
+        frame.src = targetUrl;
+      }
     }
 
     function verifyDevPassword() {
@@ -644,6 +738,19 @@ function cloakedPage(destination: string, title: string | null, slug: string = '
     var frame = document.getElementById("main-iframe");
     if (frame) {
       frame.addEventListener("load", function() {
+        var icon = document.getElementById("reload-icon");
+        var text = document.getElementById("reload-text");
+        var prog = document.getElementById("reload-progress");
+        if (icon) icon.classList.remove("spin-icon");
+        if (text) text.textContent = "Actualiser";
+        if (prog) {
+          prog.style.transform = "scaleX(1)";
+          setTimeout(function() {
+            prog.classList.remove("loading");
+            prog.style.opacity = "0";
+            prog.style.transform = "scaleX(0)";
+          }, 250);
+        }
         try {
           if (frame.contentWindow && frame.contentWindow.location) {
             checkPath(frame.contentWindow.location.pathname);
@@ -657,7 +764,11 @@ function cloakedPage(destination: string, title: string | null, slug: string = '
 
   return new Response(html, {
     status: 200,
-    headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' },
+    headers: {
+      'Content-Type': 'text/html; charset=utf-8',
+      'Cache-Control': 'private, no-cache, must-revalidate',
+      'X-Content-Type-Options': 'nosniff',
+    },
   });
 }
 
