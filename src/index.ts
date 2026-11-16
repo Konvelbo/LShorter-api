@@ -102,7 +102,7 @@ const healthHandler = async (c: any) => {
     {
       status: isHealthy ? "ok" : "degraded",
       service: "lshorterAPI",
-      version: "2.1.3",
+      version: "2.1.4",
       timestamp: new Date().toISOString(),
       d1: d1Status,
       kv: kvStatus,
@@ -114,7 +114,7 @@ const healthHandler = async (c: any) => {
 app.get("/", (c) =>
   c.json({
     service: "lshorterAPI",
-    version: "2.1.3",
+    version: "2.1.4",
     status: "operational",
     timestamp: new Date().toISOString(),
   }),
