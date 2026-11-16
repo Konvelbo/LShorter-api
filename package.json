@@ -1,6 +1,6 @@
 {
   "name": "lshorter-api",
-  "version": "2.1.2",
+  "version": "2.1.3",
   "type": "module",
   "main": "./dist/sdk.cjs",
   "module": "./dist/sdk.js",
