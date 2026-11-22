@@ -396,11 +396,22 @@ func (s *DomainsService) Delete(ctx context.Context, id string) (*DeleteResponse
 
 type WebhooksService struct{ c *Client }
 
-func (s *WebhooksService) Create(_ context.Context) (*WebhookResponse, error) {
-	return nil, &Error{
-		Status:  403,
-		Message: "Creating webhooks via the SDK is disabled. Please configure your webhooks from the LShorter Dashboard (Settings > Webhooks).",
+func (s *WebhooksService) Create(ctx context.Context, opts CreateWebhookOptions) (*WebhookResponse, error) {
+	var raw json.RawMessage
+	if _, err := s.c.doJSON(ctx, http.MethodPost, "/api/v1/webhooks", nil, opts, &raw); err != nil {
+		return nil, err
 	}
+	var wrapped struct {
+		Webhook *WebhookResponse `json:"webhook"`
+	}
+	if json.Unmarshal(raw, &wrapped) == nil && wrapped.Webhook != nil {
+		return wrapped.Webhook, nil
+	}
+	var res WebhookResponse
+	if err := json.Unmarshal(raw, &res); err != nil {
+		return nil, err
+	}
+	return &res, nil
 }
 
 func (s *WebhooksService) List(ctx context.Context) ([]WebhookResponse, error) {
@@ -419,6 +430,24 @@ func (s *WebhooksService) List(ctx context.Context) ([]WebhookResponse, error) {
 		return nil, err
 	}
 	return list, nil
+}
+
+func (s *WebhooksService) Get(ctx context.Context, id string) (*WebhookResponse, error) {
+	var raw json.RawMessage
+	if _, err := s.c.doJSON(ctx, http.MethodGet, "/api/v1/webhooks/"+url.PathEscape(id), nil, nil, &raw); err != nil {
+		return nil, err
+	}
+	var wrapped struct {
+		Webhook *WebhookResponse `json:"webhook"`
+	}
+	if json.Unmarshal(raw, &wrapped) == nil && wrapped.Webhook != nil {
+		return wrapped.Webhook, nil
+	}
+	var res WebhookResponse
+	if err := json.Unmarshal(raw, &res); err != nil {
+		return nil, err
+	}
+	return &res, nil
 }
 
 func (s *WebhooksService) Update(ctx context.Context, id string, patch map[string]any) (*WebhookResponse, error) {
@@ -451,11 +480,22 @@ func (s *WebhooksService) Delete(ctx context.Context, id string) (*DeleteRespons
 
 type PixelsService struct{ c *Client }
 
-func (s *PixelsService) Create(_ context.Context) (*PixelResponse, error) {
-	return nil, &Error{
-		Status:  403,
-		Message: "Creating retargeting pixels via the SDK is disabled. Please register your pixels from the LShorter Dashboard (Settings > Retargeting Pixels).",
+func (s *PixelsService) Create(ctx context.Context, opts CreatePixelOptions) (*PixelResponse, error) {
+	var raw json.RawMessage
+	if _, err := s.c.doJSON(ctx, http.MethodPost, "/api/v1/pixels", nil, opts, &raw); err != nil {
+		return nil, err
 	}
+	var wrapped struct {
+		Pixel *PixelResponse `json:"pixel"`
+	}
+	if json.Unmarshal(raw, &wrapped) == nil && wrapped.Pixel != nil {
+		return wrapped.Pixel, nil
+	}
+	var res PixelResponse
+	if err := json.Unmarshal(raw, &res); err != nil {
+		return nil, err
+	}
+	return &res, nil
 }
 
 func (s *PixelsService) List(ctx context.Context) ([]PixelResponse, error) {
@@ -474,6 +514,24 @@ func (s *PixelsService) List(ctx context.Context) ([]PixelResponse, error) {
 		return nil, err
 	}
 	return list, nil
+}
+
+func (s *PixelsService) Get(ctx context.Context, id string) (*PixelResponse, error) {
+	var raw json.RawMessage
+	if _, err := s.c.doJSON(ctx, http.MethodGet, "/api/v1/pixels/"+url.PathEscape(id), nil, nil, &raw); err != nil {
+		return nil, err
+	}
+	var wrapped struct {
+		Pixel *PixelResponse `json:"pixel"`
+	}
+	if json.Unmarshal(raw, &wrapped) == nil && wrapped.Pixel != nil {
+		return wrapped.Pixel, nil
+	}
+	var res PixelResponse
+	if err := json.Unmarshal(raw, &res); err != nil {
+		return nil, err
+	}
+	return &res, nil
 }
 
 func (s *PixelsService) Update(ctx context.Context, id string, patch map[string]any) (*PixelResponse, error) {

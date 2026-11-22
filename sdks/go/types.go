@@ -119,6 +119,14 @@ type DomainResponse struct {
 	DNSRecords []map[string]any `json:"dnsRecords,omitempty"`
 }
 
+// CreateWebhookOptions configures a new webhook subscription.
+type CreateWebhookOptions struct {
+	URL       string   `json:"url"`
+	Events    []string `json:"events,omitempty"`
+	SecretKey string   `json:"secretKey,omitempty"`
+	IsActive  *bool    `json:"isActive,omitempty"`
+}
+
 // WebhookResponse represents a configured webhook subscription.
 type WebhookResponse struct {
 	ID        string   `json:"id"`
@@ -126,6 +134,14 @@ type WebhookResponse struct {
 	Events    []string `json:"events"`
 	SecretKey string   `json:"secretKey,omitempty"`
 	IsActive  bool     `json:"isActive"`
+}
+
+// CreatePixelOptions configures a new retargeting pixel registration.
+type CreatePixelOptions struct {
+	Platform string `json:"platform"`
+	PixelID  string `json:"pixelId"`
+	Name     string `json:"name"`
+	IsActive *bool  `json:"isActive,omitempty"`
 }
 
 // PixelResponse represents a configured retargeting pixel.

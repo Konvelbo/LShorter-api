@@ -1,4 +1,7 @@
-use lshorter::{CreateLinkOptions, CustomerInput, LShorter, TrackConversionOptions};
+use lshorter::{
+    CreateLinkOptions, CreatePixelOptions, CreateWebhookOptions, CustomerInput, LShorter,
+    TrackConversionOptions,
+};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 
@@ -50,11 +53,23 @@ async fn spawn_mock_server() -> String {
                         "application/json",
                         r#"{"success":true,"data":{"totalClicks":120,"uniqueClicks":95,"trackedRevenue":499.0}}"#.to_string(),
                     )
+                } else if method == "POST" && path == "/api/v1/pixels" {
+                    (
+                        "200 OK",
+                        "application/json",
+                        r#"{"success":true,"data":{"pixel":{"id":"px_created","platform":"pinterest","pixelId":"26123","name":"Pin","isActive":true}}}"#.to_string(),
+                    )
                 } else if method == "GET" && path == "/api/v1/pixels" {
                     (
                         "200 OK",
                         "application/json",
                         r#"{"success":true,"data":{"pixels":[{"id":"px_1","platform":"pinterest","pixelId":"26123","name":"Pin","isActive":true}]}}"#.to_string(),
+                    )
+                } else if method == "POST" && path == "/api/v1/webhooks" {
+                    (
+                        "200 OK",
+                        "application/json",
+                        r#"{"success":true,"data":{"webhook":{"id":"wh_created","url":"https://example.com/hook","events":["click.created"],"isActive":true,"secretKey":"whsec_test"}}}"#.to_string(),
                     )
                 } else {
                     (
@@ -125,11 +140,34 @@ async fn rust_sdk_end_to_end() {
         .expect("export csv");
     assert!(csv.contains("conv_01,49.99"));
 
+    let created_px = client
+        .pixels()
+        .create(&CreatePixelOptions {
+            platform: "pinterest".to_string(),
+            pixel_id: "26123".to_string(),
+            name: "Pin".to_string(),
+            is_active: Some(true),
+        })
+        .await
+        .expect("create pixel");
+    assert_eq!(created_px.id, "px_created");
+
     let pixels = client.pixels().list().await.expect("list pixels");
     assert_eq!(pixels[0].platform, "pinterest");
 
-    let webhook_err = client.webhooks().create().await.unwrap_err();
-    assert_eq!(webhook_err.status(), Some(403));
+    let created_wh = client
+        .webhooks()
+        .create(&CreateWebhookOptions {
+            url: "https://example.com/hook".to_string(),
+            events: Some(vec!["click.created".to_string()]),
+            ..Default::default()
+        })
+        .await
+        .expect("create webhook");
+    assert_eq!(created_wh.id, "wh_created");
+
+    let notif_err = client.notifications().create().await.unwrap_err();
+    assert_eq!(notif_err.status(), Some(403));
 
     let bad = LShorter::with_base_url("lsh_live_wrong", &base_url);
     let auth_err = bad.pixels().list().await.unwrap_err();

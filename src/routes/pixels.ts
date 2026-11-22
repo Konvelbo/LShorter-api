@@ -5,8 +5,12 @@
 import { Hono } from "hono";
 import { type CloudflareBindings, type AuthContext } from "../lib/types";
 import { authMiddleware, isFrontendAuth } from "../middleware/auth";
+import { rateLimit } from "../middleware/ratelimit";
 import { CreatePixelSchema, UpdatePixelSchema } from "../lib/schemas";
 import { uid, ok, err, now } from "../lib/utils";
+
+const MAX_PIXELS_PER_USER = 50;
+const PAID_PLANS = new Set(["PRO", "BUSINESS", "ENTERPRISE"]);
 
 const pixels = new Hono<{
   Bindings: CloudflareBindings;
@@ -72,68 +76,92 @@ pixels.get("/:id", async (c) => {
   return ok({ pixel: formatPixelRow(row) });
 });
 
-// ─── POST /api/v1/pixels (Register a new pixel — Dashboard ONLY) ─────────────
-pixels.post("/", async (c) => {
-  const auth = c.get("auth");
-  if (!isFrontendAuth(auth)) {
-    return err(
-      "La création de pixels de retargeting via le SDK ou la clé API est désactivée. Veuillez enregistrer vos pixels depuis le tableau de bord LShorter.",
-      403,
-      "FORBIDDEN_SDK_CREATE",
-    );
-  }
+// ─── POST /api/v1/pixels (Register a new pixel — PRO+ & Hardened) ────────────
+pixels.post(
+  "/",
+  rateLimit({ limit: 20, windowSeconds: 60, keyType: "apiKey" }),
+  async (c) => {
+    const auth = c.get("auth");
+    const isFrontend = isFrontendAuth(auth);
 
-  const qUserId = c.req.query("userId") || c.req.header("X-User-Id");
-  let body: any = {};
-  try {
-    body = await c.req.json();
-  } catch {
-    return err("Invalid JSON body", 400);
-  }
+    // Server-side plan gating for public API keys (Free/Starter cannot create pixels)
+    if (!isFrontend && !PAID_PLANS.has(String(auth.plan || "").toUpperCase())) {
+      return err(
+        "Retargeting pixels require a PRO, BUSINESS, or ENTERPRISE subscription.",
+        403,
+        "PLAN_UPGRADE_REQUIRED",
+      );
+    }
 
-  const normalizedBody = {
-    ...body,
-    platform: typeof body?.platform === "string"
-      ? body.platform.trim().toLowerCase()
-      : typeof body?.type === "string"
-        ? body.type.trim().toLowerCase()
-        : body?.platform,
-  };
+    const qUserId = c.req.query("userId") || c.req.header("X-User-Id");
+    let body: any = {};
+    try {
+      body = await c.req.json();
+    } catch {
+      return err("Invalid JSON body", 400);
+    }
 
-  const parsed = CreatePixelSchema.safeParse(normalizedBody);
-  if (!parsed.success) {
-    return err(
-      parsed.error.issues.map((i) => i.message).join(", "),
-      422,
-      "VALIDATION_ERROR",
-    );
-  }
+    const normalizedBody = {
+      ...body,
+      platform: typeof body?.platform === "string"
+        ? body.platform.trim().toLowerCase()
+        : typeof body?.type === "string"
+          ? body.type.trim().toLowerCase()
+          : body?.platform,
+    };
 
-  const userId = body.userId || qUserId || auth.userId;
-  const { platform, pixelId, name, isActive } = parsed.data;
-  const id = uid("px");
-  const createdAt = now();
+    const parsed = CreatePixelSchema.safeParse(normalizedBody);
+    if (!parsed.success) {
+      return err(
+        parsed.error.issues.map((i) => i.message).join(", "),
+        422,
+        "VALIDATION_ERROR",
+      );
+    }
 
-  await c.env.DB.prepare(
-    `INSERT INTO retargeting_pixels (id, user_id, platform, pixel_id, name, is_active, events_tracked_count, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, 0, ?)`,
-  )
-    .bind(id, userId, platform, pixelId.trim(), name.trim(), isActive !== false ? 1 : 0, createdAt)
-    .run();
+    // Strict multi-tenant isolation: public API keys are ALWAYS bound to auth.userId
+    const userId = isFrontend ? (body.userId || qUserId || auth.userId) : auth.userId;
 
-  return ok({
-    pixel: {
-      id,
-      userId,
-      platform,
-      pixelId: pixelId.trim(),
-      name: name.trim(),
-      isActive: isActive !== false,
-      eventsTrackedCount: 0,
-      createdAt,
-    },
-  });
-});
+    // Anti-abuse quota cap per user
+    const countRow = await c.env.DB.prepare(
+      `SELECT COUNT(*) as n FROM retargeting_pixels WHERE user_id = ?`,
+    )
+      .bind(userId)
+      .first<{ n: number }>()
+      .catch(() => null);
+    if ((countRow?.n ?? 0) >= MAX_PIXELS_PER_USER) {
+      return err(
+        `Retargeting pixel limit reached (${MAX_PIXELS_PER_USER} max per account). Delete an unused pixel first.`,
+        403,
+        "PIXEL_LIMIT_REACHED",
+      );
+    }
+
+    const { platform, pixelId, name, isActive } = parsed.data;
+    const id = uid("px");
+    const createdAt = now();
+
+    await c.env.DB.prepare(
+      `INSERT INTO retargeting_pixels (id, user_id, platform, pixel_id, name, is_active, events_tracked_count, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, 0, ?)`,
+    )
+      .bind(id, userId, platform, pixelId.trim(), name.trim(), isActive !== false ? 1 : 0, createdAt)
+      .run();
+
+    return ok({
+      pixel: {
+        id,
+        userId,
+        platform,
+        pixelId: pixelId.trim(),
+        name: name.trim(),
+        isActive: isActive !== false,
+        eventsTrackedCount: 0,
+        createdAt,
+      },
+    });
+  },
+);
 
 // ─── PATCH /api/v1/pixels/:id (Update pixel configuration) ───────────────────
 pixels.patch("/:id", async (c) => {

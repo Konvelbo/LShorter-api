@@ -252,12 +252,13 @@ pub struct WebhooksResource<'a> {
 }
 
 impl<'a> WebhooksResource<'a> {
-    pub async fn create(&self) -> Result<WebhookResponse> {
-        Err(LShorterError::api(
-            403,
-            "Creating webhooks via the SDK is disabled. Please configure your webhooks from the LShorter Dashboard (Settings > Webhooks).",
-            None,
-        ))
+    pub async fn create(&self, options: &CreateWebhookOptions) -> Result<WebhookResponse> {
+        let val = self
+            .http
+            .request::<Value, CreateWebhookOptions>(Method::POST, "/api/v1/webhooks", Some(options), &[])
+            .await?;
+        let item = val.get("webhook").cloned().unwrap_or(val);
+        Ok(serde_json::from_value(item)?)
     }
 
     pub async fn list(&self) -> Result<Vec<WebhookResponse>> {
@@ -299,12 +300,13 @@ pub struct PixelsResource<'a> {
 }
 
 impl<'a> PixelsResource<'a> {
-    pub async fn create(&self) -> Result<PixelResponse> {
-        Err(LShorterError::api(
-            403,
-            "Creating retargeting pixels via the SDK is disabled. Please register your pixels from the LShorter Dashboard (Settings > Retargeting Pixels).",
-            None,
-        ))
+    pub async fn create(&self, options: &CreatePixelOptions) -> Result<PixelResponse> {
+        let val = self
+            .http
+            .request::<Value, CreatePixelOptions>(Method::POST, "/api/v1/pixels", Some(options), &[])
+            .await?;
+        let item = val.get("pixel").cloned().unwrap_or(val);
+        Ok(serde_json::from_value(item)?)
     }
 
     pub async fn list(&self) -> Result<Vec<PixelResponse>> {

@@ -202,10 +202,11 @@ console.log(`Domaines actifs : ${quotas.domainsCount} / ${quotas.domainsLimit}`)
 | `lsh.domains` | `.list()` | Lister ses domaines personnalisés |
 | `lsh.domains` | `.create(options)` | Ajouter un domaine personnalisé |
 | `lsh.domains` | `.verify(id)` | Vérifier la configuration DNS d'un domaine |
-| `lsh.webhooks` | `.list()` / `.get(id)` | Consulter ses abonnements webhooks (création exclusive via Dashboard) |
-| `lsh.pixels` | `.list()` / `.get(id)` | Consulter ses pixels de retargeting configurés (création exclusive via Dashboard) |
+| `lsh.webhooks` | `.create(options)` / `.list()` / `.get(id)` / `.update(id, options)` / `.delete(id)` | Créer et gérer ses abonnements webhooks *(Plan PRO+)* |
+| `lsh.pixels` | `.create(options)` / `.list()` / `.get(id)` / `.update(id, options)` / `.delete(id)` | Créer et gérer ses pixels de retargeting (9 plateformes : Meta, Instagram, Google, YouTube, TikTok, LinkedIn, Pinterest, Snapchat, X — *Plan PRO+*) |
+| `lsh.notifications` / `lsh.targets` | `.list()` / `.get(id)` | Consulter ses alertes et objectifs *(création exclusive via Dashboard)* |
 
-> 🔒 **Webhooks & Pixels de Retargeting :** Par mesure de sécurité et pour garantir l'intégrité de votre compte, la création et la configuration initiale de webhooks ou de pixels de retargeting s'effectuent exclusivement depuis le tableau de bord web LShorter (Paramètres > Webhooks / Pixels). Les méthodes de consultation (`.list()`, `.get()`) restent accessibles via le SDK, et les identifiants de pixels existants peuvent être directement associés à vos liens lors de leur création (`lsh.links.create({ pixels: ['pix_xxx'] })`).
+> 🔒 **Sécurité Webhooks & Pixels :** La création et la gestion complète des webhooks (`lsh.webhooks.create(...)`) et des pixels de retargeting (`lsh.pixels.create(...)`) via le SDK nécessitent un forfait **PRO, BUSINESS ou ENTERPRISE** et sont protégées côté serveur (isolation multi-tenant stricte, validation anti-SSRF/anti-boucle/anti-XSS, rate limiting et quotas par compte). Les alertes/notifications (`lsh.notifications`) restent configurables exclusivement depuis le Dashboard Web LShorter.
 
 ---
 

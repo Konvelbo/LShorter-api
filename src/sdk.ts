@@ -528,6 +528,32 @@ class DomainsModule {
 
 // ─── Module: Webhooks ────────────────────────────────────────────────────────
 
+export type WebhookEvent =
+  | 'click.created'
+  | 'click.unique'
+  | 'conversion.created'
+  | 'link.created'
+  | 'link.updated'
+  | 'link.deleted'
+  | 'link.expired'
+  | 'qr.scanned'
+  | 'target.reached'
+  | 'subscription.activated'
+  | 'subscription.cancelled'
+  | 'subscription.renewed'
+  | string;
+
+export interface CreateWebhookOptions {
+  /** Public HTTPS/HTTP destination endpoint URL */
+  url: string;
+  /** Events to subscribe to (default: ['click.created', 'conversion.created']) */
+  events?: WebhookEvent[];
+  /** Optional custom HMAC secret key (>= 8 chars); auto-generated if omitted */
+  secretKey?: string;
+  /** Whether the webhook starts active (default: true) */
+  isActive?: boolean;
+}
+
 export interface WebhookResponse {
   id: string;
   userId?: string;
@@ -542,7 +568,7 @@ export interface WebhookResponse {
 
 export interface UpdateWebhookOptions {
   url?: string;
-  events?: string[];
+  events?: WebhookEvent[];
   secretKey?: string;
   isActive?: boolean;
 }
@@ -551,14 +577,11 @@ class WebhooksModule {
   constructor(private readonly http: HttpClient) {}
 
   /**
-   * Webhook creation via SDK is disabled.
-   * Webhooks must be created and configured securely from the LShorter Dashboard (Paramètres > Webhooks).
+   * Create a new webhook endpoint (requires PRO, BUSINESS, or ENTERPRISE plan).
    */
-  create(): never {
-    throw new QuickLinkError(
-      "Creating webhooks via the SDK is disabled. Please configure your webhooks from the LShorter Dashboard (Settings > Webhooks).",
-      403
-    );
+  async create(options: CreateWebhookOptions): Promise<WebhookResponse> {
+    const res = await this.http.post<{ webhook: WebhookResponse }>('/api/v1/webhooks', options);
+    return res.webhook || (res as unknown as WebhookResponse);
   }
 
   async list(): Promise<WebhookResponse[]> {
@@ -583,23 +606,35 @@ class WebhooksModule {
 
 // ─── Module: Pixels ──────────────────────────────────────────────────────────
 
+export type PixelPlatform =
+  | 'meta'
+  | 'facebook'
+  | 'instagram'
+  | 'google'
+  | 'google_tag'
+  | 'youtube'
+  | 'tiktok'
+  | 'linkedin'
+  | 'pinterest'
+  | 'snapchat'
+  | 'x'
+  | 'twitter';
+
+export interface CreatePixelOptions {
+  /** Ad network platform (meta, instagram, google, youtube, tiktok, linkedin, pinterest, snapchat, x) */
+  platform: PixelPlatform;
+  /** Platform-specific Pixel / Tag ID (2-64 alphanumeric, dash, underscore chars) */
+  pixelId: string;
+  /** Human-readable internal display name */
+  name: string;
+  /** Whether the pixel starts active (default: true) */
+  isActive?: boolean;
+}
+
 export interface PixelResponse {
   id: string;
   userId?: string;
-  platform:
-    | 'meta'
-    | 'facebook'
-    | 'instagram'
-    | 'google'
-    | 'google_tag'
-    | 'youtube'
-    | 'tiktok'
-    | 'linkedin'
-    | 'pinterest'
-    | 'snapchat'
-    | 'x'
-    | 'twitter'
-    | string;
+  platform: PixelPlatform | string;
   pixelId: string;
   name: string;
   isActive: boolean;
@@ -617,14 +652,11 @@ class PixelsModule {
   constructor(private readonly http: HttpClient) {}
 
   /**
-   * Retargeting pixel creation via SDK is disabled.
-   * Pixels must be registered from the LShorter Dashboard (Paramètres > Pixels de Retargeting).
+   * Register a new retargeting pixel (requires PRO, BUSINESS, or ENTERPRISE plan).
    */
-  create(): never {
-    throw new QuickLinkError(
-      "Creating retargeting pixels via the SDK is disabled. Please register your pixels from the LShorter Dashboard (Settings > Retargeting Pixels).",
-      403
-    );
+  async create(options: CreatePixelOptions): Promise<PixelResponse> {
+    const res = await this.http.post<{ pixel: PixelResponse }>('/api/v1/pixels', options);
+    return res.pixel || (res as unknown as PixelResponse);
   }
 
   async list(): Promise<PixelResponse[]> {

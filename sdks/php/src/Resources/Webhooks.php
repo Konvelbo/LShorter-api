@@ -4,19 +4,17 @@ declare(strict_types=1);
 
 namespace LShorter\Resources;
 
-use LShorter\Exceptions\LShorterException;
 use LShorter\HttpClient;
 
 final class Webhooks
 {
     public function __construct(private readonly HttpClient $http) {}
 
-    public function create(): never
+    /** @param array<string, mixed> $options @return array<string, mixed> */
+    public function create(array $options): array
     {
-        throw new LShorterException(
-            'Creating webhooks via the SDK is disabled. Please configure your webhooks from the LShorter Dashboard (Settings > Webhooks).',
-            403,
-        );
+        $res = (array) $this->http->post('/api/v1/webhooks', $options);
+        return isset($res['webhook']) && is_array($res['webhook']) ? $res['webhook'] : $res;
     }
 
     /** @return array<int, array<string, mixed>> */

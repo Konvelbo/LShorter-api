@@ -4,19 +4,17 @@ declare(strict_types=1);
 
 namespace LShorter\Resources;
 
-use LShorter\Exceptions\LShorterException;
 use LShorter\HttpClient;
 
 final class Pixels
 {
     public function __construct(private readonly HttpClient $http) {}
 
-    public function create(): never
+    /** @param array<string, mixed> $options @return array<string, mixed> */
+    public function create(array $options): array
     {
-        throw new LShorterException(
-            'Creating retargeting pixels via the SDK is disabled. Please register your pixels from the LShorter Dashboard (Settings > Retargeting Pixels).',
-            403,
-        );
+        $res = (array) $this->http->post('/api/v1/pixels', $options);
+        return isset($res['pixel']) && is_array($res['pixel']) ? $res['pixel'] : $res;
     }
 
     /** @return array<int, array<string, mixed>> */

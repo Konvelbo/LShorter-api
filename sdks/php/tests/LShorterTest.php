@@ -70,12 +70,32 @@ final class LShorterTest extends TestCase
                     ];
                 }
 
+                if ($method === 'POST' && $path === '/api/v1/pixels') {
+                    return [
+                        'status' => 200,
+                        'body' => json_encode([
+                            'success' => true,
+                            'data' => ['pixel' => ['id' => 'px_created', 'platform' => 'pinterest', 'pixelId' => '26123', 'name' => 'Pin']],
+                        ], JSON_THROW_ON_ERROR),
+                    ];
+                }
+
                 if ($method === 'GET' && $path === '/api/v1/pixels') {
                     return [
                         'status' => 200,
                         'body' => json_encode([
                             'success' => true,
                             'data' => ['pixels' => [['id' => 'px_1', 'platform' => 'pinterest', 'pixelId' => '26123']]],
+                        ], JSON_THROW_ON_ERROR),
+                    ];
+                }
+
+                if ($method === 'POST' && $path === '/api/v1/webhooks') {
+                    return [
+                        'status' => 200,
+                        'body' => json_encode([
+                            'success' => true,
+                            'data' => ['webhook' => ['id' => 'wh_created', 'url' => 'https://example.com/hook', 'events' => ['click.created']]],
                         ], JSON_THROW_ON_ERROR),
                     ];
                 }
@@ -113,16 +133,29 @@ final class LShorterTest extends TestCase
         $csv = $lsh->analytics->exportCsv('link_01');
         $this->assertStringContainsString('conv_01,49.99', $csv);
 
+        $createdPx = $lsh->pixels->create([
+            'platform' => 'pinterest',
+            'pixelId' => '26123',
+            'name' => 'Pin',
+        ]);
+        $this->assertSame('px_created', $createdPx['id']);
+
         $pixels = $lsh->pixels->list();
         $this->assertSame('pinterest', $pixels[0]['platform']);
+
+        $createdWh = $lsh->webhooks->create([
+            'url' => 'https://example.com/hook',
+            'events' => ['click.created'],
+        ]);
+        $this->assertSame('wh_created', $createdWh['id']);
     }
 
-    public function testDashboardOnlyCreateThrows403(): void
+    public function testNotificationsCreateThrows403(): void
     {
         $lsh = new LShorter('lsh_live_test', 'https://api.local', $this->createMockTransport());
         $this->expectException(LShorterException::class);
         $this->expectExceptionCode(403);
-        $lsh->webhooks->create();
+        $lsh->notifications->create();
     }
 
     public function testUnauthorizedThrows401(): void

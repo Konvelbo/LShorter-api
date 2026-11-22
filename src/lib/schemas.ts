@@ -545,14 +545,25 @@ const safePixelId = z
 export const CreatePixelSchema = z.object({
   platform: z.enum(PIXEL_PLATFORMS),
   pixelId: safePixelId,
-  name: z.string().trim().min(1).max(100),
+  name: z
+    .string()
+    .trim()
+    .min(1, "Pixel name is required")
+    .max(100, "Pixel name is too long")
+    .regex(/^[^<>]+$/, "Pixel name cannot contain HTML characters"),
   isActive: z.boolean().default(true).optional(),
 });
 
 export type CreatePixelInput = z.infer<typeof CreatePixelSchema>;
 
 export const UpdatePixelSchema = z.object({
-  name: z.string().trim().min(1).max(100).optional(),
+  name: z
+    .string()
+    .trim()
+    .min(1)
+    .max(100)
+    .regex(/^[^<>]+$/, "Pixel name cannot contain HTML characters")
+    .optional(),
   pixelId: safePixelId.optional(),
   isActive: z.boolean().optional(),
 });
@@ -561,19 +572,63 @@ export type UpdatePixelInput = z.infer<typeof UpdatePixelSchema>;
 
 // ─── Webhooks ─────────────────────────────────────────────────────────────────
 
+export const WEBHOOK_EVENTS = [
+  "click.created",
+  "click.unique",
+  "conversion.created",
+  "link.created",
+  "link.updated",
+  "link.deleted",
+  "link.expired",
+  "qr.scanned",
+  "target.reached",
+  "subscription.activated",
+  "subscription.cancelled",
+  "subscription.renewed",
+] as const;
+
+const SELF_WEBHOOK_HOSTS = new Set([
+  "lsho.cc",
+  "www.lsho.cc",
+  "api.lsho.cc",
+  "lshorter-api.fiatechnologiecam.workers.dev",
+]);
+
+const safeWebhookUrl = safeUrl.refine(
+  (u) => {
+    try {
+      const host = new URL(u).hostname.toLowerCase();
+      return !SELF_WEBHOOK_HOSTS.has(host);
+    } catch {
+      return false;
+    }
+  },
+  "Self-referencing LShorter webhook URLs are forbidden",
+);
+
+const optionalWebhookSecret = z.preprocess(
+  (v) => (typeof v === "string" && v.trim() === "" ? undefined : v),
+  z.string().trim().min(8, "Webhook secretKey must be at least 8 characters").max(256).optional(),
+);
+
 export const CreateWebhookSchema = z.object({
-  url: safeUrl,
-  events: z.array(z.string()).default(["click.created", "conversion.created"]).optional(),
-  secretKey: z.string().optional(),
+  url: safeWebhookUrl,
+  events: z
+    .array(z.enum(WEBHOOK_EVENTS))
+    .min(1, "At least one webhook event is required")
+    .max(20, "At most 20 webhook events are allowed")
+    .default(["click.created", "conversion.created"])
+    .optional(),
+  secretKey: optionalWebhookSecret,
   isActive: z.boolean().default(true).optional(),
 });
 
 export type CreateWebhookInput = z.infer<typeof CreateWebhookSchema>;
 
 export const UpdateWebhookSchema = z.object({
-  url: safeUrl.optional(),
-  events: z.array(z.string()).optional(),
-  secretKey: z.string().optional(),
+  url: safeWebhookUrl.optional(),
+  events: z.array(z.enum(WEBHOOK_EVENTS)).min(1).max(20).optional(),
+  secretKey: optionalWebhookSecret,
   isActive: z.boolean().optional(),
   lastStatus: z.number().optional(),
   lastTriggeredAt: z.string().optional(),

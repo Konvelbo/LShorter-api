@@ -5,8 +5,19 @@
 import { Hono } from "hono";
 import { type CloudflareBindings, type AuthContext } from "../lib/types";
 import { authMiddleware, isFrontendAuth } from "../middleware/auth";
+import { rateLimit } from "../middleware/ratelimit";
 import { CreateWebhookSchema, UpdateWebhookSchema } from "../lib/schemas";
 import { uid, ok, err, now } from "../lib/utils";
+
+const MAX_WEBHOOKS_PER_USER = 25;
+const PAID_PLANS = new Set(["PRO", "BUSINESS", "ENTERPRISE"]);
+
+function generateCryptoWebhookSecret(): string {
+  const bytes = new Uint8Array(16);
+  crypto.getRandomValues(bytes);
+  const hex = Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+  return `whsec_${hex}`;
+}
 
 const webhooks = new Hono<{
   Bindings: CloudflareBindings;
@@ -83,71 +94,98 @@ webhooks.get("/:id", async (c) => {
   return ok({ webhook: formatWebhookRow(row) });
 });
 
-// ─── POST /api/v1/webhooks (Create a new webhook — Dashboard ONLY) ───────────
-webhooks.post("/", async (c) => {
-  const auth = c.get("auth");
-  if (!isFrontendAuth(auth)) {
-    return err(
-      "La création de webhooks via le SDK ou la clé API est désactivée. Veuillez configurer vos webhooks depuis le tableau de bord LShorter.",
-      403,
-      "FORBIDDEN_SDK_CREATE",
-    );
-  }
+// ─── POST /api/v1/webhooks (Create a new webhook — PRO+ & Hardened) ──────────
+webhooks.post(
+  "/",
+  rateLimit({ limit: 20, windowSeconds: 60, keyType: "apiKey" }),
+  async (c) => {
+    const auth = c.get("auth");
+    const isFrontend = isFrontendAuth(auth);
 
-  const qUserId = c.req.query("userId") || c.req.header("X-User-Id");
-  let body: any = {};
-  try {
-    body = await c.req.json();
-  } catch {
-    return err("Invalid JSON body", 400);
-  }
+    // Server-side plan gating for public API keys (Free/Starter cannot provision webhooks)
+    if (!isFrontend && !PAID_PLANS.has(String(auth.plan || "").toUpperCase())) {
+      return err(
+        "Webhooks require a PRO, BUSINESS, or ENTERPRISE subscription.",
+        403,
+        "PLAN_UPGRADE_REQUIRED",
+      );
+    }
 
-  const parsed = CreateWebhookSchema.safeParse(body);
-  if (!parsed.success) {
-    return err(
-      parsed.error.issues.map((i) => i.message).join(", "),
-      422,
-      "VALIDATION_ERROR",
-    );
-  }
+    const qUserId = c.req.query("userId") || c.req.header("X-User-Id");
+    let body: any = {};
+    try {
+      body = await c.req.json();
+    } catch {
+      return err("Invalid JSON body", 400);
+    }
 
-  const userId = body.userId || qUserId || auth.userId;
-  const { url, events, secretKey, isActive } = parsed.data;
-  const id = uid("wh");
-  const finalSecret = secretKey?.trim() || uid("whsec", 16);
-  const finalEvents = Array.isArray(events) && events.length > 0 ? events : ["click.created", "conversion.created"];
-  const createdAt = now();
+    const parsed = CreateWebhookSchema.safeParse(body);
+    if (!parsed.success) {
+      return err(
+        parsed.error.issues.map((i) => i.message).join(", "),
+        422,
+        "VALIDATION_ERROR",
+      );
+    }
 
-  await c.env.DB.prepare(
-    `INSERT INTO webhooks (id, user_id, url, events, secret_key, is_active, last_triggered_at, last_status, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, NULL, 200, ?)`,
-  )
-    .bind(
-      id,
-      userId,
-      url,
-      JSON.stringify(finalEvents),
-      finalSecret,
-      isActive !== false ? 1 : 0,
-      createdAt,
+    // Strict multi-tenant isolation: public API keys are ALWAYS bound to auth.userId
+    const userId = isFrontend ? (body.userId || qUserId || auth.userId) : auth.userId;
+
+    // Anti-abuse quota cap per user
+    const countRow = await c.env.DB.prepare(
+      `SELECT COUNT(*) as n FROM webhooks WHERE user_id = ?`,
     )
-    .run();
+      .bind(userId)
+      .first<{ n: number }>()
+      .catch(() => null);
+    if ((countRow?.n ?? 0) >= MAX_WEBHOOKS_PER_USER) {
+      return err(
+        `Webhook limit reached (${MAX_WEBHOOKS_PER_USER} max per account). Delete an unused webhook first.`,
+        403,
+        "WEBHOOK_LIMIT_REACHED",
+      );
+    }
 
-  return ok({
-    webhook: {
-      id,
-      userId,
-      url,
-      events: finalEvents,
-      secretKey: finalSecret,
-      isActive: isActive !== false,
-      lastTriggeredAt: null,
-      lastStatus: 200,
-      createdAt,
-      created_at: createdAt,
-    },
-  });
-});
+    const { url, events, secretKey, isActive } = parsed.data;
+    const id = uid("wh");
+    const finalSecret = secretKey?.trim() || generateCryptoWebhookSecret();
+    const finalEvents =
+      Array.isArray(events) && events.length > 0
+        ? Array.from(new Set(events))
+        : ["click.created", "conversion.created"];
+    const createdAt = now();
+
+    await c.env.DB.prepare(
+      `INSERT INTO webhooks (id, user_id, url, events, secret_key, is_active, last_triggered_at, last_status, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, NULL, 200, ?)`,
+    )
+      .bind(
+        id,
+        userId,
+        url,
+        JSON.stringify(finalEvents),
+        finalSecret,
+        isActive !== false ? 1 : 0,
+        createdAt,
+      )
+      .run();
+
+    return ok({
+      webhook: {
+        id,
+        userId,
+        url,
+        events: finalEvents,
+        secretKey: finalSecret,
+        isActive: isActive !== false,
+        lastTriggeredAt: null,
+        lastStatus: 200,
+        createdAt,
+        created_at: createdAt,
+      },
+    });
+  },
+);
 
 // ─── PATCH /api/v1/webhooks/:id (Update webhook) ─────────────────────────────
 webhooks.patch("/:id", async (c) => {
@@ -193,7 +231,7 @@ webhooks.patch("/:id", async (c) => {
   }
   if (parsed.data.events !== undefined) {
     setParts.push("events = ?");
-    bindings.push(JSON.stringify(parsed.data.events));
+    bindings.push(JSON.stringify(Array.from(new Set(parsed.data.events))));
   }
   if (parsed.data.secretKey !== undefined) {
     setParts.push("secret_key = ?");

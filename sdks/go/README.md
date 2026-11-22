@@ -184,11 +184,11 @@ if errors.As(err, &apiErr) {
 | `client.Analytics` | `.Links(ctx, limit)` | Statistiques agrégées par lien |
 | `client.Analytics` | `.ExportCSV(ctx, linkID)` | Exporter les conversions en CSV *(Plan PRO)* |
 | `client.Domains` | `.List` / `.Create` / `.Verify` / `.Delete` | Gérer et vérifier ses domaines personnalisés |
-| `client.Webhooks` | `.List` / `.Update` / `.Delete` | Piloter ses webhooks existants *(création via Dashboard)* |
-| `client.Pixels` | `.List` / `.Update` / `.Delete` | Piloter ses pixels de retargeting *(création via Dashboard)* |
-| `client.Notifications` / `.Targets` | `.List(ctx)` / `.Get(ctx, id)` | Consulter ses alertes et objectifs *(lecture seule)* |
+| `client.Webhooks` | `.Create` / `.List` / `.Get` / `.Update` / `.Delete` | Créer et gérer ses webhooks *(Plan PRO+)* |
+| `client.Pixels` | `.Create` / `.List` / `.Get` / `.Update` / `.Delete` | Créer et gérer ses pixels de retargeting (9 plateformes — *Plan PRO+*) |
+| `client.Notifications` / `.Targets` | `.List(ctx)` / `.Get(ctx, id)` | Consulter ses alertes et objectifs *(création exclusive via Dashboard)* |
 
-> 🔒 **Webhooks, Pixels & Notifications :** Par mesure de sécurité et pour garantir l'intégrité de votre compte, la création initiale de webhooks, de pixels de retargeting ou d'alertes s'effectue exclusivement depuis le tableau de bord web LShorter (*Paramètres*). Les méthodes de consultation et de gestion restent accessibles via le SDK, et les identifiants de pixels existants peuvent être directement associés à vos liens lors de leur création.
+> 🔒 **Sécurité Webhooks, Pixels & Notifications :** La création et la gestion complète des webhooks (`client.Webhooks.Create(ctx, opts)`) et des pixels de retargeting (`client.Pixels.Create(ctx, opts)`) via le SDK nécessitent un forfait **PRO, BUSINESS ou ENTERPRISE** et sont sécurisées côté serveur (isolation multi-tenant, anti-SSRF/XSS, rate limiting et quotas). Seule la création d'alertes/notifications reste réservée au Dashboard Web LShorter.
 
 ---
 

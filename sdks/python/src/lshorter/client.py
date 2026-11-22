@@ -279,11 +279,9 @@ class WebhooksResource:
     def __init__(self, http: HttpClient) -> None:
         self._http = http
 
-    def create(self, *_args: Any, **_kwargs: Any) -> None:
-        raise LShorterError(
-            "Creating webhooks via the SDK is disabled. Please configure your webhooks from the LShorter Dashboard (Settings > Webhooks).",
-            status=403,
-        )
+    def create(self, payload: Mapping[str, Any]) -> Dict[str, Any]:
+        res = self._http.post("/api/v1/webhooks", payload)
+        return res["webhook"] if isinstance(res, dict) and "webhook" in res else res
 
     def list(self) -> List[Dict[str, Any]]:
         res = self._http.get("/api/v1/webhooks")
@@ -310,11 +308,9 @@ class PixelsResource:
     def __init__(self, http: HttpClient) -> None:
         self._http = http
 
-    def create(self, *_args: Any, **_kwargs: Any) -> None:
-        raise LShorterError(
-            "Creating retargeting pixels via the SDK is disabled. Please register your pixels from the LShorter Dashboard (Settings > Retargeting Pixels).",
-            status=403,
-        )
+    def create(self, payload: Mapping[str, Any]) -> Dict[str, Any]:
+        res = self._http.post("/api/v1/pixels", payload)
+        return res["pixel"] if isinstance(res, dict) and "pixel" in res else res
 
     def list(self) -> List[Dict[str, Any]]:
         res = self._http.get("/api/v1/pixels")

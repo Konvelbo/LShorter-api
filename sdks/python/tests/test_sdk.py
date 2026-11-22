@@ -88,10 +88,42 @@ class _MockHandler(BaseHTTPRequestHandler):
             return
         if method == "GET" and self.path.startswith("/api/v1/analytics"):
             return self._send_json(200, {"success": True, "data": {"totalClicks": 120, "trackedRevenue": 499.0}})
+        if method == "POST" and self.path == "/api/v1/pixels":
+            return self._send_json(
+                200,
+                {
+                    "success": True,
+                    "data": {
+                        "pixel": {
+                            "id": "px_created",
+                            "platform": body["platform"],
+                            "pixelId": body["pixelId"],
+                            "name": body["name"],
+                            "isActive": True,
+                        }
+                    },
+                },
+            )
         if method == "GET" and self.path == "/api/v1/pixels":
             return self._send_json(
                 200,
                 {"success": True, "data": {"pixels": [{"id": "px_1", "platform": "pinterest", "pixelId": "26123"}]}},
+            )
+        if method == "POST" and self.path == "/api/v1/webhooks":
+            return self._send_json(
+                200,
+                {
+                    "success": True,
+                    "data": {
+                        "webhook": {
+                            "id": "wh_created",
+                            "url": body["url"],
+                            "events": body.get("events", ["click.created"]),
+                            "secretKey": "whsec_generated",
+                            "isActive": True,
+                        }
+                    },
+                },
             )
         if method == "GET" and self.path == "/api/v1/webhooks":
             return self._send_json(
@@ -175,8 +207,20 @@ class LShorterPythonSdkTests(unittest.TestCase):
         verified = self.client.domains.verify("dom_1")
         self.assertEqual(verified["status"], "active")
 
+        created_px = self.client.pixels.create(
+            {"platform": "pinterest", "pixelId": "2612345678901", "name": "Pin Main"}
+        )
+        self.assertEqual(created_px["id"], "px_created")
+        self.assertEqual(created_px["platform"], "pinterest")
+
         pixels = self.client.pixels.list()
         self.assertEqual(pixels[0]["platform"], "pinterest")
+
+        created_wh = self.client.webhooks.create(
+            {"url": "https://example.com/hook", "events": ["click.created", "qr.scanned"]}
+        )
+        self.assertEqual(created_wh["id"], "wh_created")
+        self.assertEqual(created_wh["url"], "https://example.com/hook")
 
         webhooks = self.client.webhooks.list()
         self.assertEqual(webhooks[0]["id"], "wh_1")
@@ -184,11 +228,10 @@ class LShorterPythonSdkTests(unittest.TestCase):
         target = self.client.targets.get("tgt_1")
         self.assertEqual(target["targetValue"], 500)
 
-    def test_dashboard_only_creates_raise_403(self) -> None:
-        for fn in (self.client.webhooks.create, self.client.pixels.create, self.client.notifications.create):
-            with self.assertRaises(LShorterError) as ctx:
-                fn()
-            self.assertEqual(ctx.exception.status, 403)
+    def test_notifications_create_raises_403(self) -> None:
+        with self.assertRaises(LShorterError) as ctx:
+            self.client.notifications.create()
+        self.assertEqual(ctx.exception.status, 403)
 
     def test_unauthorized_raises_typed_error(self) -> None:
         bad = LShorter(api_key="lsh_live_wrong", base_url=self.base_url)

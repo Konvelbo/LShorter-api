@@ -68,6 +68,20 @@ function createMockEnv(store: MockStore) {
             return { n } as any;
           }
 
+          if (s.includes("SELECT COUNT(*) as n FROM webhooks WHERE user_id = ?")) {
+            const uid = binds[0];
+            let n = 0;
+            for (const w of store.webhooks.values()) if (w.user_id === uid) n++;
+            return { n } as any;
+          }
+
+          if (s.includes("SELECT COUNT(*) as n FROM retargeting_pixels WHERE user_id = ?")) {
+            const uid = binds[0];
+            let n = 0;
+            for (const p of store.pixels.values()) if (p.user_id === uid) n++;
+            return { n } as any;
+          }
+
           if (s.includes("FROM links WHERE id = ?") && !s.includes("OR slug")) {
             return (store.links.get(binds[0]) || null) as any;
           }
@@ -279,6 +293,24 @@ function createMockEnv(store: MockStore) {
             return { meta: { changes: 1 } };
           }
 
+          if (s.startsWith("UPDATE webhooks SET")) {
+            const id = binds[binds.length - 1];
+            const row = store.webhooks.get(id);
+            if (row) {
+              if (s.includes("is_active = ?")) row.is_active = binds[0];
+              if (s.includes("last_status = ?")) row.last_status = 999;
+            }
+            return { meta: { changes: row ? 1 : 0 } };
+          }
+
+          if (s.startsWith("DELETE FROM webhooks WHERE id = ?")) {
+            return { meta: { changes: store.webhooks.delete(binds[0]) ? 1 : 0 } };
+          }
+
+          if (s.startsWith("DELETE FROM retargeting_pixels WHERE id = ?")) {
+            return { meta: { changes: store.pixels.delete(binds[0]) ? 1 : 0 } };
+          }
+
           if (s.startsWith("INSERT INTO target_alerts")) {
             const row = {
               id: binds[0],
@@ -453,42 +485,156 @@ describe("LShorter API Security Hardening & 9-Platform Pixels", () => {
     }
   });
 
-  // ── 2. Server-side 403 on SDK creation of webhooks, pixels, and targets ────
-  it("strictly forbids public API keys from creating webhooks, pixels, and target alerts (even with spoofed X-Frontend-Secret)", async () => {
-    const attempts = [
-      {
-        path: "/api/v1/webhooks",
-        body: { url: "https://example.com/hook", events: ["click.created"] },
-      },
-      {
-        path: "/api/v1/pixels",
-        body: { platform: "pinterest", pixelId: "2612345678901", name: "Pin SDK Attempt" },
-      },
-      {
-        path: "/api/v1/targets",
-        body: { metricType: "clicks", targetValue: 100 },
-      },
-    ];
+  // ── 2. Server-side SDK security controls on webhooks, pixels, and targets ──
+  it("enforces PRO plan gating, ownership binding, loop/XSS/quota limits on SDK webhooks & pixels, while keeping targets Dashboard-only", async () => {
+    // 2a. Targets / notifications creation remains strictly Dashboard-only (403 FORBIDDEN_SDK_CREATE)
+    const tgtRes = await app.fetch(
+      new Request("https://api.test/api/v1/targets?userId=usr_frontend_master", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${PRO_API_KEY}`,
+          "X-Frontend-Secret": "lsh_spoofed_header",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ metricType: "clicks", targetValue: 100 }),
+      }),
+      env,
+      execCtx,
+    );
+    expect(tgtRes.status).toBe(403);
+    expect(((await tgtRes.json()) as any).code).toBe("FORBIDDEN_SDK_CREATE");
 
-    for (const attempt of attempts) {
+    // 2b. Free-tier API keys are strictly blocked (403 PLAN_UPGRADE_REQUIRED) on webhooks, pixels, and link pixel attachment
+    for (const [path, body] of [
+      ["/api/v1/webhooks", { url: "https://example.com/hook", events: ["click.created"] }],
+      ["/api/v1/pixels", { platform: "pinterest", pixelId: "2612345678901", name: "Free Pin" }],
+      ["/api/v1/links", { targetUrl: "https://example.com", pixels: ["px_any"] }],
+    ] as const) {
       const res = await app.fetch(
-        new Request(`https://api.test${attempt.path}?userId=usr_frontend_master`, {
+        new Request(`https://api.test${path}`, {
           method: "POST",
           headers: {
-            Authorization: `Bearer ${PRO_API_KEY}`,
-            "X-Frontend-Secret": "lsh_spoofed_header",
+            Authorization: `Bearer ${FREE_API_KEY}`,
             "Content-Type": "application/json",
           },
-          body: JSON.stringify(attempt.body),
+          body: JSON.stringify(body),
         }),
         env,
         execCtx,
       );
-      expect(res.status, attempt.path).toBe(403);
-      const json: any = await res.json();
-      expect(json.success).toBe(false);
-      expect(json.code).toBe("FORBIDDEN_SDK_CREATE");
+      expect(res.status, `free tier ${path}`).toBe(403);
+      expect(((await res.json()) as any).code).toBe("PLAN_UPGRADE_REQUIRED");
     }
+
+    // 2c. PRO API key CAN create its own webhook, and spoofed userId is strictly ignored (always bound to auth.userId)
+    const whCreate = await app.fetch(
+      new Request("https://api.test/api/v1/webhooks?userId=usr_victim", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${PRO_API_KEY}`,
+          "X-User-Id": "usr_victim",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          userId: "usr_victim",
+          url: "https://hooks.example.com/events",
+          events: ["click.created", "qr.scanned"],
+        }),
+      }),
+      env,
+      execCtx,
+    );
+    expect(whCreate.status).toBe(200);
+    const whJson: any = await whCreate.json();
+    expect(whJson.data.webhook.userId).toBe("usr_attacker");
+    expect(whJson.data.webhook.secretKey).toMatch(/^whsec_[0-9a-f]{32}$/);
+
+    // 2d. Public API key cannot spoof lastStatus on PATCH webhook
+    const whPatch = await app.fetch(
+      new Request(`https://api.test/api/v1/webhooks/${whJson.data.webhook.id}`, {
+        method: "PATCH",
+        headers: {
+          Authorization: `Bearer ${PRO_API_KEY}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ isActive: false, lastStatus: 999 }),
+      }),
+      env,
+      execCtx,
+    );
+    expect(whPatch.status).toBe(200);
+    expect(store.webhooks.get(whJson.data.webhook.id).last_status).toBe(200);
+
+    // 2e. Self-referencing webhook loop, invalid event name, and HTML pixel name rejected (422)
+    const selfLoop = await app.fetch(
+      new Request("https://api.test/api/v1/webhooks", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${PRO_API_KEY}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ url: "https://lsho.cc/api/v1/links", events: ["click.created"] }),
+      }),
+      env,
+      execCtx,
+    );
+    expect(selfLoop.status).toBe(422);
+
+    const badEvent = await app.fetch(
+      new Request("https://api.test/api/v1/webhooks", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${PRO_API_KEY}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ url: "https://hooks.example.com/a", events: ["not.a.real.event"] }),
+      }),
+      env,
+      execCtx,
+    );
+    expect(badEvent.status).toBe(422);
+
+    const xssPixelName = await app.fetch(
+      new Request("https://api.test/api/v1/pixels", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${PRO_API_KEY}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ platform: "pinterest", pixelId: "2612345678901", name: "<script>alert(1)</script>" }),
+      }),
+      env,
+      execCtx,
+    );
+    expect(xssPixelName.status).toBe(422);
+
+    // 2f. Cross-tenant pixel attachment blocked on POST /api/v1/links (403 FORBIDDEN_PIXEL)
+    const foreignPxLink = await app.fetch(
+      new Request("https://api.test/api/v1/links", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${PRO_API_KEY}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ targetUrl: "https://example.com/steal-px", pixels: ["px_victim_1"] }),
+      }),
+      env,
+      execCtx,
+    );
+    expect(foreignPxLink.status).toBe(403);
+    expect(((await foreignPxLink.json()) as any).code).toBe("FORBIDDEN_PIXEL");
+
+    // 2g. Per-user webhook quota cap enforced (max 25 -> 403 WEBHOOK_LIMIT_REACHED)
+    for (let i = 0; i < 24; i++) {
+      store.webhooks.set(`wh_fill_${i}`, {
+        id: `wh_fill_${i}`,
+        user_id: "usr_attacker",
+        url: `https://hooks.example.com/fill/${i}`,
+        events: JSON.stringify(["click.created"]),
+        secret_key: "whsec_fill",
+        is_active: 1,
+        created_at: new Date().toISOString(),
+      });
+    }
+    const overQuota = await app.fetch(
+      new Request("https://api.test/api/v1/webhooks", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${PRO_API_KEY}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ url: "https://hooks.example.com/over-quota", events: ["click.created"] }),
+      }),
+      env,
+      execCtx,
+    );
+    expect(overQuota.status).toBe(403);
+    expect(((await overQuota.json()) as any).code).toBe("WEBHOOK_LIMIT_REACHED");
   });
 
   // ── 3. IDOR protection across links, pixels, webhooks, and analytics ───────
@@ -832,11 +978,12 @@ describe("LShorter API Security Hardening & 9-Platform Pixels", () => {
 
     const createdPixelIds: string[] = [];
     for (const p of allPlatforms) {
+      // Create all 9 pixel platforms directly via PRO public API key (SDK flow)
       const res = await app.fetch(
-        new Request("https://api.test/api/v1/pixels?userId=usr_attacker", {
+        new Request("https://api.test/api/v1/pixels", {
           method: "POST",
           headers: {
-            "X-Frontend-Secret": FRONTEND_SECRET,
+            Authorization: `Bearer ${PRO_API_KEY}`,
             "Content-Type": "application/json",
           },
           body: JSON.stringify(p),
@@ -847,6 +994,7 @@ describe("LShorter API Security Hardening & 9-Platform Pixels", () => {
       expect(res.status, `create ${p.platform}`).toBe(200);
       const json: any = await res.json();
       expect(json.data.pixel.platform).toBe(p.platform);
+      expect(json.data.pixel.userId).toBe("usr_attacker");
       createdPixelIds.push(json.data.pixel.id);
     }
 

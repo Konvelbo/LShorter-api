@@ -193,11 +193,11 @@ try {
 | `$lsh->analytics` | `->links($limit)` | Statistiques agrégées par lien |
 | `$lsh->analytics` | `->exportCsv($linkId)` | Exporter les conversions en CSV *(Plan PRO)* |
 | `$lsh->domains` | `->list()` / `->create($domain)` / `->verify($id)` / `->delete($id)` | Gérer et vérifier ses domaines personnalisés |
-| `$lsh->webhooks` | `->list()` / `->get($id)` / `->update($id, $opts)` / `->delete($id)` | Piloter ses webhooks existants *(création via Dashboard)* |
-| `$lsh->pixels` | `->list()` / `->get($id)` / `->update($id, $opts)` / `->delete($id)` | Piloter ses pixels de retargeting *(création via Dashboard)* |
-| `$lsh->notifications` / `->targets` | `->list()` / `->get($id)` | Consulter ses alertes et objectifs *(lecture seule)* |
+| `$lsh->webhooks` | `->create($opts)` / `->list()` / `->get($id)` / `->update($id, $opts)` / `->delete($id)` | Créer et gérer ses webhooks *(Plan PRO+)* |
+| `$lsh->pixels` | `->create($opts)` / `->list()` / `->get($id)` / `->update($id, $opts)` / `->delete($id)` | Créer et gérer ses pixels de retargeting (9 plateformes — *Plan PRO+*) |
+| `$lsh->notifications` / `->targets` | `->list()` / `->get($id)` | Consulter ses alertes et objectifs *(création exclusive via Dashboard)* |
 
-> 🔒 **Webhooks, Pixels & Notifications :** Par mesure de sécurité et pour garantir l'intégrité de votre compte, la création initiale de webhooks, de pixels de retargeting ou d'alertes s'effectue exclusivement depuis le tableau de bord web LShorter (*Paramètres*). Les méthodes de consultation et de gestion restent accessibles via le SDK, et les identifiants de pixels existants peuvent être directement associés à vos liens lors de leur création (`$lsh->links->create(['targetUrl' => '...', 'pixels' => ['px_xxx']])`).
+> 🔒 **Sécurité Webhooks, Pixels & Notifications :** La création et la gestion complète des webhooks (`$lsh->webhooks->create([...])`) et des pixels de retargeting (`$lsh->pixels->create([...])`) via le SDK nécessitent un forfait **PRO, BUSINESS ou ENTERPRISE** et sont sécurisées côté serveur (isolation multi-tenant, anti-SSRF/XSS, rate limiting et quotas). Seule la création d'alertes/notifications reste réservée au Dashboard Web LShorter. Les pixels créés peuvent être associés directement à vos liens (`$lsh->links->create(['targetUrl' => '...', 'pixels' => ['px_xxx']])`).
 
 ---
 

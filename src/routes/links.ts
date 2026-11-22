@@ -35,6 +35,26 @@ function sanitizePixelIds(raw: unknown): string[] | null {
   return ids;
 }
 
+async function verifyOwnedPixelIds(
+  db: D1Database,
+  userId: string,
+  pixelIds: string[],
+): Promise<boolean> {
+  if (pixelIds.length === 0) return true;
+  const rows = await db
+    .prepare(`SELECT id, pixel_id FROM retargeting_pixels WHERE user_id = ?`)
+    .bind(userId)
+    .all<{ id: string; pixel_id: string }>()
+    .catch(() => null);
+  if (!rows || !Array.isArray(rows.results)) return false;
+  const owned = new Set<string>();
+  for (const r of rows.results) {
+    if (r.id) owned.add(String(r.id));
+    if (r.pixel_id) owned.add(String(r.pixel_id));
+  }
+  return pixelIds.every((pid) => owned.has(pid));
+}
+
 const links = new Hono<{
   Bindings: CloudflareBindings;
   Variables: { auth: AuthContext };
@@ -658,6 +678,26 @@ links.post(
     const rawPixels = (parsed.data as any).pixels ?? (parsed.data as any).pixel_ids ?? (parsed.data as any).pixelIds;
     const cleanPixels = sanitizePixelIds(rawPixels);
 
+    if (cleanPixels && cleanPixels.length > 0) {
+      if (isFreeTier) {
+        return err(
+          "Retargeting pixels require the PRO plan or higher.",
+          403,
+          "PLAN_UPGRADE_REQUIRED",
+        );
+      }
+      if (!isFrontendCaller) {
+        const ownsAllPixels = await verifyOwnedPixelIds(c.env.DB, userId, cleanPixels);
+        if (!ownsAllPixels) {
+          return err(
+            "Forbidden: one or more retargeting pixel IDs do not belong to your account.",
+            403,
+            "FORBIDDEN_PIXEL",
+          );
+        }
+      }
+    }
+
     let inserted = false;
     while (!inserted && attempts < maxAttempts) {
       attempts++;
@@ -1244,6 +1284,25 @@ links.patch("/:id", async (c) => {
     : (updates as any).pixelIds;
   if (rawPatchPixels !== undefined) {
     const cleanPixels = sanitizePixelIds(rawPatchPixels);
+    if (cleanPixels && cleanPixels.length > 0) {
+      if (isFreeTier) {
+        return err(
+          "Retargeting pixels require the PRO plan or higher.",
+          403,
+          "PLAN_UPGRADE_REQUIRED",
+        );
+      }
+      if (!isFrontendValid) {
+        const ownsAllPixels = await verifyOwnedPixelIds(c.env.DB, userId, cleanPixels);
+        if (!ownsAllPixels) {
+          return err(
+            "Forbidden: one or more retargeting pixel IDs do not belong to your account.",
+            403,
+            "FORBIDDEN_PIXEL",
+          );
+        }
+      }
+    }
     setParts.push("pixels = ?");
     bindings.push(cleanPixels ? JSON.stringify(cleanPixels) : null);
   }

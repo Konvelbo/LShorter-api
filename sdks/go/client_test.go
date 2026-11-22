@@ -56,12 +56,30 @@ func TestGoSDKEndToEnd(t *testing.T) {
 				"success": true,
 				"data":    map[string]any{"totalClicks": 120, "uniqueClicks": 95, "trackedRevenue": 499.0},
 			})
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/pixels":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"success": true,
+				"data": map[string]any{
+					"pixel": map[string]any{
+						"id": "px_created", "platform": "pinterest", "pixelId": "26123", "name": "Pin", "isActive": true,
+					},
+				},
+			})
 		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/pixels":
 			_ = json.NewEncoder(w).Encode(map[string]any{
 				"success": true,
 				"data": map[string]any{
 					"pixels": []map[string]any{
 						{"id": "px_1", "platform": "pinterest", "pixelId": "26123", "name": "Pin", "isActive": true},
+					},
+				},
+			})
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/webhooks":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"success": true,
+				"data": map[string]any{
+					"webhook": map[string]any{
+						"id": "wh_created", "url": "https://example.com/hook", "events": []string{"click.created"}, "isActive": true,
 					},
 				},
 			})
@@ -104,13 +122,30 @@ func TestGoSDKEndToEnd(t *testing.T) {
 		t.Fatalf("unexpected csv output: %q err=%v", csvOut, err)
 	}
 
+	createdPx, err := client.Pixels.Create(ctx, lshorter.CreatePixelOptions{
+		Platform: "pinterest",
+		PixelID:  "26123",
+		Name:     "Pin",
+	})
+	if err != nil || createdPx.ID != "px_created" {
+		t.Fatalf("unexpected create pixel: %+v err=%v", createdPx, err)
+	}
+
 	pixels, err := client.Pixels.List(ctx)
 	if err != nil || len(pixels) != 1 || pixels[0].Platform != "pinterest" {
 		t.Fatalf("unexpected pixels: %+v err=%v", pixels, err)
 	}
 
-	if _, err := client.Webhooks.Create(ctx); err == nil {
-		t.Fatalf("expected 403 error from webhooks.Create")
+	createdWh, err := client.Webhooks.Create(ctx, lshorter.CreateWebhookOptions{
+		URL:    "https://example.com/hook",
+		Events: []string{"click.created"},
+	})
+	if err != nil || createdWh.ID != "wh_created" {
+		t.Fatalf("unexpected create webhook: %+v err=%v", createdWh, err)
+	}
+
+	if _, err := client.Notifications.Create(ctx); err == nil {
+		t.Fatalf("expected 403 error from notifications.Create")
 	} else {
 		var apiErr *lshorter.Error
 		if !errors.As(err, &apiErr) || apiErr.Status != 403 {
