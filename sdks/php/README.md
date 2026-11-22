@@ -5,7 +5,7 @@ Zero-dependency PHP 8.1+ SDK for [LShorter](https://lsho.cc): ultra-fast edge UR
 ## Installation
 
 ```bash
-composer require lshorter/lshorter-php
+composer require lshorter/lshorter-api
 ```
 
 ## Quickstart

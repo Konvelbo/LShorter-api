@@ -5,7 +5,7 @@ Official async Rust SDK for [LShorter](https://lsho.cc): ultra-fast edge URL sho
 ## Installation
 
 ```bash
-cargo add lshorter
+cargo add lshorter-api
 ```
 
 ## Quickstart

@@ -1,5 +1,5 @@
 [package]
-name = "lshorter"
+name = "lshorter-api"
 version = "1.0.0"
 edition = "2021"
 license = "MIT"
@@ -10,6 +10,10 @@ repository = "https://github.com/Konvelbo/LShorter-api"
 readme = "README.md"
 keywords = ["lshorter", "url-shortener", "short-link", "analytics", "edge"]
 categories = ["api-bindings", "web-programming::http-client"]
+
+[lib]
+name = "lshorter"
+path = "src/lib.rs"
 
 [dependencies]
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }

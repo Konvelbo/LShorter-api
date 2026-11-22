@@ -1,5 +1,5 @@
 {
-  "name": "lshorter/lshorter-php",
+  "name": "lshorter/lshorter-api",
   "description": "Official PHP SDK for LShorter — Ultra-fast Edge URL Shortener, Dynamic Routing, PathLock™, and Conversion Tracking.",
   "type": "library",
   "license": "MIT",
