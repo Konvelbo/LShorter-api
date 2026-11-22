@@ -149,11 +149,11 @@ CREATE TABLE IF NOT EXISTS webhooks (
     FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
 );
 
--- 7. Table Pixels de Retargeting
+-- 7. Table Pixels de Retargeting (9 plateformes publicitaires + alias)
 CREATE TABLE IF NOT EXISTS retargeting_pixels (
     id TEXT PRIMARY KEY,
     user_id TEXT NOT NULL,
-    platform TEXT CHECK(platform IN ('facebook', 'google_tag', 'tiktok', 'linkedin')) NOT NULL,
+    platform TEXT CHECK(platform IN ('meta', 'facebook', 'instagram', 'google', 'google_tag', 'youtube', 'tiktok', 'linkedin', 'pinterest', 'snapchat', 'x', 'twitter')) NOT NULL,
     pixel_id TEXT NOT NULL,
     name TEXT NOT NULL,
     is_active BOOLEAN DEFAULT 1,
