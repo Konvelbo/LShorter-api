@@ -33,7 +33,7 @@ impl HttpClient {
             base = DEFAULT_BASE_URL.to_string();
         }
         let client = Client::builder()
-            .user_agent("lshorter-rust/1.0.0")
+            .user_agent("lshorter-rust/1.1.0")
             .build()
             .expect("failed to build reqwest client");
         Self {

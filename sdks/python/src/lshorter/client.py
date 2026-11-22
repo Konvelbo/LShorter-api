@@ -56,7 +56,7 @@ class HttpClient:
         headers: Dict[str, str] = {
             "Authorization": f"Bearer {self.api_key}",
             "Accept": "application/json",
-            "User-Agent": "lshorter-python/1.0.0",
+            "User-Agent": "lshorter-python/1.1.0",
         }
         data: Optional[bytes] = None
         if body is not None:
@@ -113,7 +113,7 @@ class HttpClient:
             url,
             headers={
                 "Authorization": f"Bearer {self.api_key}",
-                "User-Agent": "lshorter-python/1.0.0",
+                "User-Agent": "lshorter-python/1.1.0",
             },
             method=method,
         )

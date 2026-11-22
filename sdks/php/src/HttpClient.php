@@ -44,7 +44,7 @@ final class HttpClient
         $headers = [
             'Authorization' => 'Bearer ' . $this->apiKey,
             'Accept' => 'application/json',
-            'User-Agent' => 'lshorter-php/1.0.0',
+            'User-Agent' => 'lshorter-php/1.1.0',
         ];
 
         $encodedBody = null;
@@ -85,7 +85,7 @@ final class HttpClient
         $url = $this->buildUrl($path, $params);
         $res = $this->transport->send('GET', $url, [
             'Authorization' => 'Bearer ' . $this->apiKey,
-            'User-Agent' => 'lshorter-php/1.0.0',
+            'User-Agent' => 'lshorter-php/1.1.0',
         ]);
 
         if ($res['status'] >= 400) {

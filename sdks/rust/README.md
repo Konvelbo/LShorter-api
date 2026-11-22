@@ -35,7 +35,7 @@ Ou dans votre `Cargo.toml` :
 
 ```toml
 [dependencies]
-lshorter-api = "1.0"
+lshorter-api = "1.1"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 ```
 

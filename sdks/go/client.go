@@ -107,7 +107,7 @@ func (c *Client) doJSON(ctx context.Context, method, path string, query url.Valu
 	}
 	req.Header.Set("Authorization", "Bearer "+c.apiKey)
 	req.Header.Set("Accept", "application/json")
-	req.Header.Set("User-Agent", "lshorter-go/1.0.0")
+	req.Header.Set("User-Agent", "lshorter-go/1.1.0")
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
@@ -158,7 +158,7 @@ func (c *Client) doText(ctx context.Context, path string, query url.Values) (str
 		return "", err
 	}
 	req.Header.Set("Authorization", "Bearer "+c.apiKey)
-	req.Header.Set("User-Agent", "lshorter-go/1.0.0")
+	req.Header.Set("User-Agent", "lshorter-go/1.1.0")
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
