@@ -5,7 +5,7 @@ Official zero-dependency Python SDK for [LShorter](https://lsho.cc): ultra-fast 
 ## Installation
 
 ```bash
-pip install lshorter
+pip install lshorter-api
 ```
 
 ## Quickstart

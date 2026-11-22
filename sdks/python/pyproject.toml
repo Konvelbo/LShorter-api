@@ -3,8 +3,8 @@ requires = ["hatchling>=1.24.0"]
 build-backend = "hatchling.build"
 
 [project]
-name = "lshorter"
-version = "1.0.0"
+name = "lshorter-api"
+version = "1.0.1"
 description = "Official Python SDK for LShorter — Ultra-fast Edge URL Shortener, Dynamic Routing, PathLock™, and Conversion Tracking."
 readme = "README.md"
 license = { text = "MIT" }
