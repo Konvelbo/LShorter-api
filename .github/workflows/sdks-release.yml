@@ -90,8 +90,11 @@ jobs:
             echo "ERROR: Missing PHP_MIRROR_TOKEN repository secret." >&2
             exit 1
           fi
+          rm -rf sdks/php/vendor sdks/php/composer.lock sdks/php/.phpunit.cache
+          git config user.name "LShorter Release Bot"
+          git config user.email "release@lsho.cc"
           TAG_VER="${GITHUB_REF_NAME#php-}"
-          git subtree split --prefix=sdks/php -b php-release
+          git subtree split --prefix=sdks/php HEAD -b php-release
           git tag -f "${TAG_VER}" php-release
           git push "https://x-access-token:${PHP_MIRROR_TOKEN}@github.com/Konvelbo/lshorter-php.git" php-release:refs/heads/main --force
           git push "https://x-access-token:${PHP_MIRROR_TOKEN}@github.com/Konvelbo/lshorter-php.git" "refs/tags/${TAG_VER}" --force

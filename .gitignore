@@ -50,4 +50,5 @@ sdks/python/.pytest_cache/
 sdks/rust/target/
 sdks/rust/Cargo.lock
 sdks/php/vendor/
+sdks/php/composer.lock
 sdks/php/.phpunit.cache/
