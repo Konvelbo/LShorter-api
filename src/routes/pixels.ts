@@ -164,8 +164,12 @@ pixels.post(
 );
 
 // ─── PATCH /api/v1/pixels/:id (Update pixel configuration) ───────────────────
-pixels.patch("/:id", async (c) => {
+pixels.patch(
+  "/:id",
+  rateLimit({ limit: 30, windowSeconds: 60, keyType: "apiKey" }),
+  async (c) => {
   const auth = c.get("auth");
+  const isFrontend = isFrontendAuth(auth);
   const id = c.req.param("id");
   let body: any = {};
   try {
@@ -180,6 +184,18 @@ pixels.patch("/:id", async (c) => {
       parsed.error.issues.map((i) => i.message).join(", "),
       422,
       "VALIDATION_ERROR",
+    );
+  }
+
+  if (
+    !isFrontend &&
+    !PAID_PLANS.has(String(auth.plan || "").toUpperCase()) &&
+    (parsed.data.isActive === true || parsed.data.pixelId !== undefined)
+  ) {
+    return err(
+      "Retargeting pixels require a PRO, BUSINESS, or ENTERPRISE subscription.",
+      403,
+      "PLAN_UPGRADE_REQUIRED",
     );
   }
 
@@ -230,10 +246,14 @@ pixels.patch("/:id", async (c) => {
     .first<any>();
 
   return ok({ pixel: formatPixelRow(updated) });
-});
+  },
+);
 
 // ─── DELETE /api/v1/pixels/:id (Remove pixel) ────────────────────────────────
-pixels.delete("/:id", async (c) => {
+pixels.delete(
+  "/:id",
+  rateLimit({ limit: 30, windowSeconds: 60, keyType: "apiKey" }),
+  async (c) => {
   const auth = c.get("auth");
   const id = c.req.param("id");
 
@@ -256,6 +276,7 @@ pixels.delete("/:id", async (c) => {
     .run();
 
   return ok({ success: true, deleted: true, deletedId: id });
-});
+  },
+);
 
 export default pixels;

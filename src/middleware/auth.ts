@@ -27,7 +27,10 @@ function timingSafeEqualStr(a: string, b: string): boolean {
  * FRONTEND_API_SECRET (never accepts test strings or prefix heuristics).
  */
 export function isFrontendMasterRequest(c: Context<any, any, any>): boolean {
-  const expectedSecret = (c.env as CloudflareBindings)?.FRONTEND_API_SECRET || 'lsh_secret_live_prod_2026';
+  // Fail-closed: FRONTEND_API_SECRET MUST be explicitly configured via Wrangler secret / env.
+  // Never fall back to a hardcoded secret in source code.
+  const expectedSecret = ((c.env as CloudflareBindings)?.FRONTEND_API_SECRET || '').trim();
+  if (!expectedSecret) return false;
   const frontendSecret = (c.req.header('X-Frontend-Secret') || '').trim();
   const authHeader = c.req.header('Authorization') || '';
   const bearer = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : '';
@@ -195,9 +198,9 @@ export const authMiddleware: MiddlewareHandler<{
   // 1. Hash the provided plain token
   const hash = await sha256(token);
 
-  // 2. Lookup the API key in D1 and LEFT JOIN with users to get plan
+  // 2. Lookup the API key in D1 and LEFT JOIN with users to get plan (least-privilege fallback: FREEMIUM)
   const row = await c.env.DB.prepare(
-    `SELECT k.id as keyId, k.user_id as userId, COALESCE(u.plan, 'PRO') as plan
+    `SELECT k.id as keyId, k.user_id as userId, COALESCE(u.plan, 'FREEMIUM') as plan
      FROM api_keys k
      LEFT JOIN users u ON k.user_id = u.id
      WHERE k.key_hash = ? LIMIT 1`

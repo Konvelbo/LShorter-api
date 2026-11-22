@@ -188,7 +188,10 @@ webhooks.post(
 );
 
 // ─── PATCH /api/v1/webhooks/:id (Update webhook) ─────────────────────────────
-webhooks.patch("/:id", async (c) => {
+webhooks.patch(
+  "/:id",
+  rateLimit({ limit: 30, windowSeconds: 60, keyType: "apiKey" }),
+  async (c) => {
   const auth = c.get("auth");
   const isFrontend = isFrontendAuth(auth);
   const id = c.req.param("id");
@@ -205,6 +208,19 @@ webhooks.patch("/:id", async (c) => {
       parsed.error.issues.map((i) => i.message).join(", "),
       422,
       "VALIDATION_ERROR",
+    );
+  }
+
+  // Prevent downgraded free-tier public API keys from reactivating or repointing webhooks
+  if (
+    !isFrontend &&
+    !PAID_PLANS.has(String(auth.plan || "").toUpperCase()) &&
+    (parsed.data.isActive === true || parsed.data.url !== undefined || parsed.data.events !== undefined)
+  ) {
+    return err(
+      "Webhooks require a PRO, BUSINESS, or ENTERPRISE subscription.",
+      403,
+      "PLAN_UPGRADE_REQUIRED",
     );
   }
 
@@ -267,10 +283,14 @@ webhooks.patch("/:id", async (c) => {
     .first<any>();
 
   return ok({ webhook: formatWebhookRow(updated) });
-});
+  },
+);
 
 // ─── DELETE /api/v1/webhooks/:id (Remove webhook) ────────────────────────────
-webhooks.delete("/:id", async (c) => {
+webhooks.delete(
+  "/:id",
+  rateLimit({ limit: 30, windowSeconds: 60, keyType: "apiKey" }),
+  async (c) => {
   const auth = c.get("auth");
   const id = c.req.param("id");
 
@@ -293,6 +313,7 @@ webhooks.delete("/:id", async (c) => {
     .run();
 
   return ok({ success: true, deleted: true, deletedId: id });
-});
+  },
+);
 
 export default webhooks;

@@ -496,7 +496,7 @@ analytics.get("/export", requirePlan("PRO"), async (c) => {
 // ─── GET /api/v1/analytics/links  (per-link summary) ─────────────────────────
 analytics.get("/links", async (c) => {
   const { userId } = c.get("auth");
-  const limit = Math.min(50, parseInt(c.req.query("limit") ?? "10", 10));
+  const limit = Math.max(1, Math.min(50, parseInt(c.req.query("limit") ?? "10", 10) || 10));
 
   const { results } = await c.env.DB.prepare(
     `SELECT l.id, l.slug, l.domain_name, l.clicks_count, l.unique_clicks

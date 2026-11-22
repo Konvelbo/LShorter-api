@@ -16,6 +16,8 @@ import {
 const FRONTEND_SECRET = "super_real_frontend_secret_2026";
 const PRO_API_KEY = "lsh_live_pro_attacker_key_000001";
 const FREE_API_KEY = "lsh_live_free_user_key_000002";
+const ENT_API_KEY = "lsh_live_ent_user_key_000003";
+const ORPHAN_API_KEY = "lsh_live_orphan_key_000004";
 
 const VALID_1X1_PNG_DATA_URI =
   "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/5+hHgAHggJ/PchI7wAAAABJRU5ErkJggg==";
@@ -26,6 +28,7 @@ interface MockStore {
   links: Map<string, any>;
   pixels: Map<string, any>;
   webhooks: Map<string, any>;
+  domains: Map<string, any>;
   targets: Map<string, any>;
   clickEvents: any[];
   uploadedImages: Map<string, { id: string; mime_type: string; data: string }>;
@@ -51,7 +54,8 @@ function createMockEnv(store: MockStore) {
             for (const k of store.apiKeys.values()) {
               if (k.key_hash === hash) {
                 const u = store.users.get(k.user_id);
-                return { keyId: k.id, userId: k.user_id, plan: u?.plan || "PRO" } as any;
+                const fallback = s.includes("COALESCE(u.plan, 'FREEMIUM')") ? "FREEMIUM" : "PRO";
+                return { keyId: k.id, userId: k.user_id, plan: u?.plan || fallback } as any;
               }
             }
             return null;
@@ -59,6 +63,13 @@ function createMockEnv(store: MockStore) {
 
           if (s.includes("FROM users WHERE id = ?")) {
             return (store.users.get(binds[0]) || null) as any;
+          }
+
+          if (s.includes("SELECT COUNT(*) as n FROM custom_domains WHERE user_id = ?")) {
+            const uid = binds[0];
+            let n = 0;
+            for (const d of store.domains.values()) if (d.user_id === uid) n++;
+            return { n } as any;
           }
 
           if (s.includes("SELECT COUNT(*) as n FROM links WHERE user_id = ?")) {
@@ -113,6 +124,16 @@ function createMockEnv(store: MockStore) {
             const slug = String(binds[0]).toLowerCase();
             for (const l of store.links.values()) {
               if (l.slug.toLowerCase() === slug) return l as any;
+            }
+            return null;
+          }
+
+          if (s.includes("FROM links WHERE slug = ? OR id = ?")) {
+            const [slugVal, idVal] = binds;
+            for (const l of store.links.values()) {
+              if (l.slug === slugVal || l.id === idVal || l.slug.toLowerCase() === String(slugVal).toLowerCase()) {
+                return l as any;
+              }
             }
             return null;
           }
@@ -325,6 +346,17 @@ function createMockEnv(store: MockStore) {
             return { meta: { changes: 1 } };
           }
 
+          if (s.startsWith("INSERT INTO custom_domains")) {
+            store.domains.set(binds[0], {
+              id: binds[0],
+              user_id: binds[1],
+              domain: binds[2],
+              status: "pending",
+              created_at: binds[3],
+            });
+            return { meta: { changes: 1 } };
+          }
+
           if (s.startsWith("INSERT OR REPLACE INTO uploaded_images")) {
             store.uploadedImages.set(binds[0], {
               id: binds[0],
@@ -378,11 +410,14 @@ describe("LShorter API Security Hardening & 9-Platform Pixels", () => {
       users: new Map([
         ["usr_attacker", { id: "usr_attacker", email: "attacker@example.com", name: "Attacker", plan: "PRO" }],
         ["usr_free", { id: "usr_free", email: "free@example.com", name: "Free", plan: "FREEMIUM" }],
+        ["usr_ent", { id: "usr_ent", email: "ent@example.com", name: "Enterprise", plan: "ENTERPRISE" }],
         ["usr_victim", { id: "usr_victim", email: "victim@example.com", name: "Victim", plan: "PRO" }],
       ]),
       apiKeys: new Map([
         ["key_pro", { id: "key_pro", user_id: "usr_attacker", key_hash: await sha256(PRO_API_KEY) }],
         ["key_free", { id: "key_free", user_id: "usr_free", key_hash: await sha256(FREE_API_KEY) }],
+        ["key_ent", { id: "key_ent", user_id: "usr_ent", key_hash: await sha256(ENT_API_KEY) }],
+        ["key_orphan", { id: "key_orphan", user_id: "usr_deleted_orphan", key_hash: await sha256(ORPHAN_API_KEY) }],
       ]),
       links: new Map([
         [
@@ -432,6 +467,7 @@ describe("LShorter API Security Hardening & 9-Platform Pixels", () => {
           },
         ],
       ]),
+      domains: new Map(),
       targets: new Map(),
       clickEvents: [
         {
@@ -1069,4 +1105,172 @@ describe("LShorter API Security Hardening & 9-Platform Pixels", () => {
     expect(safeInterstitial).not.toContain("javascript:alert(1)");
     expect(safeInterstitial).toContain("https://lsho.cc");
   });
+
+  // ── 9. Hardened auth fail-closed, click auth, PATCH guards, PathLock XSS/hash, Enterprise domains ──
+  it("enforces fail-closed frontend secret, click ingestion auth, PATCH slug/loop checks, safe PathLock HTML, and Enterprise unlimited domains", async () => {
+    // 9a. Fail-closed: when FRONTEND_API_SECRET is missing/unset, NO fallback secret is accepted
+    const envUnsetSecret = { ...env, FRONTEND_API_SECRET: "" };
+    const noSecretRes = await app.fetch(
+      new Request("https://api.test/api/v1/users/me?userId=usr_victim", {
+        headers: { "X-Frontend-Secret": "lsh_secret_live_prod_2026" },
+      }),
+      envUnsetSecret,
+      execCtx,
+    );
+    expect([401, 403]).toContain(noSecretRes.status);
+
+    // 9b. Orphaned API key without a users row falls back to FREEMIUM (never PRO)
+    const orphanWh = await app.fetch(
+      new Request("https://api.test/api/v1/webhooks", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${ORPHAN_API_KEY}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ url: "https://hooks.example.com/orphan", events: ["click.created"] }),
+      }),
+      env,
+      execCtx,
+    );
+    expect(orphanWh.status).toBe(403);
+    expect(((await orphanWh.json()) as any).code).toBe("PLAN_UPGRADE_REQUIRED");
+
+    // 9c. POST /api/v1/links/:slug/click requires FRONTEND_API_SECRET (blocks anonymous & public API keys)
+    const unauthClick = await app.fetch(
+      new Request("https://api.test/api/v1/links/victim-secret/click", { method: "POST" }),
+      env,
+      execCtx,
+    );
+    expect(unauthClick.status).toBe(403);
+
+    const apiKeyClick = await app.fetch(
+      new Request("https://api.test/api/v1/links/victim-secret/click", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${PRO_API_KEY}` },
+      }),
+      env,
+      execCtx,
+    );
+    expect(apiKeyClick.status).toBe(403);
+
+    const internalClick = await app.fetch(
+      new Request("https://api.test/api/v1/links/victim-secret/click", {
+        method: "POST",
+        headers: { "X-Frontend-Secret": FRONTEND_SECRET },
+      }),
+      env,
+      execCtx,
+    );
+    expect(internalClick.status).toBe(200);
+
+    // 9d. PATCH /api/v1/links/:id blocks RESERVED_SLUGS and INFINITE_REDIRECT
+    store.links.set("link_own_patch", {
+      id: "link_own_patch",
+      user_id: "usr_attacker",
+      domain_name: "lsho.cc",
+      slug: "own-valid",
+      target_url: "https://example.com/ok",
+      is_active: 1,
+      clicks_count: 0,
+      created_at: new Date().toISOString(),
+    });
+    const patchReserved = await app.fetch(
+      new Request("https://api.test/api/v1/links/link_own_patch", {
+        method: "PATCH",
+        headers: { Authorization: `Bearer ${PRO_API_KEY}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ slug: "admin" }),
+      }),
+      env,
+      execCtx,
+    );
+    expect(patchReserved.status).toBe(400);
+    expect(((await patchReserved.json()) as any).code).toBe("RESERVED_SLUG");
+
+    const patchLoop = await app.fetch(
+      new Request("https://api.test/api/v1/links/link_own_patch", {
+        method: "PATCH",
+        headers: { Authorization: `Bearer ${PRO_API_KEY}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ targetUrl: "https://sub.lsho.cc/r/own-valid" }),
+      }),
+      env,
+      execCtx,
+    );
+    expect(patchLoop.status).toBe(400);
+    expect(((await patchLoop.json()) as any).code).toBe("INFINITE_REDIRECT");
+
+    // 9e. Subdomain self-loop blocked in CreateWebhookSchema
+    expect(
+      CreateWebhookSchema.safeParse({
+        url: "https://sub.lsho.cc/hook",
+        events: ["click.created"],
+      }).success,
+    ).toBe(false);
+
+    // 9f. cloakedPage safely escapes trailing backslashes in JS strings & hashes pathLockPassword
+    store.links.set("link_pathlock_sec", {
+      id: "link_pathlock_sec",
+      user_id: "usr_attacker",
+      domain_name: "lsho.cc",
+      slug: "locked-safe",
+      target_url: "https://example.com/private-app",
+      is_active: 1,
+      is_cloaked: 1,
+      path_lock_mode: "strict",
+      path_lock_prefix: "app\\",
+      path_lock_password: "UltraSecretPathLock_789!",
+      clicks_count: 0,
+      created_at: new Date().toISOString(),
+    });
+    const cloakRes = await app.fetch(new Request("https://lsho.cc/r/locked-safe"), env, ctxStub(execCtx));
+    expect(cloakRes.status).toBe(200);
+    const cloakHtml = await cloakRes.text();
+    expect(cloakHtml).not.toContain("UltraSecretPathLock_789!");
+    expect(cloakHtml).toContain(await sha256("UltraSecretPathLock_789!"));
+    expect(cloakHtml).toContain('var lockPrefix = "app\\\\";');
+
+    // 9g. ENTERPRISE unlimited domains (-1) works instead of failing 0 >= -1
+    const entDom = await app.fetch(
+      new Request("https://api.test/api/v1/domains", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${ENT_API_KEY}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ domain: "go.enterprise.example" }),
+      }),
+      env,
+      execCtx,
+    );
+    expect(entDom.status).toBe(201);
+
+    // 9h. Downgraded FREE-tier key cannot reactivate existing webhook via PATCH, but CAN pause it
+    store.webhooks.set("wh_free_old", {
+      id: "wh_free_old",
+      user_id: "usr_free",
+      url: "https://hooks.example.com/old",
+      events: JSON.stringify(["click.created"]),
+      secret_key: "whsec_old",
+      is_active: 0,
+      created_at: new Date().toISOString(),
+    });
+    const reactivateFree = await app.fetch(
+      new Request("https://api.test/api/v1/webhooks/wh_free_old", {
+        method: "PATCH",
+        headers: { Authorization: `Bearer ${FREE_API_KEY}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ isActive: true }),
+      }),
+      env,
+      execCtx,
+    );
+    expect(reactivateFree.status).toBe(403);
+
+    const pauseFree = await app.fetch(
+      new Request("https://api.test/api/v1/webhooks/wh_free_old", {
+        method: "PATCH",
+        headers: { Authorization: `Bearer ${FREE_API_KEY}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ isActive: false }),
+      }),
+      env,
+      execCtx,
+    );
+    expect(pauseFree.status).toBe(200);
+  });
 });
+
+function ctxStub(c: any) {
+  return c;
+}

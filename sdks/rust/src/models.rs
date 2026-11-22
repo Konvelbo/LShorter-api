@@ -174,6 +174,7 @@ pub struct AnalyticsDashboard {
 #[serde(rename_all = "camelCase")]
 pub struct DomainResponse {
     pub id: String,
+    #[serde(default, alias = "domain_name")]
     pub domain: String,
     pub status: String,
     #[serde(default)]

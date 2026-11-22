@@ -8,6 +8,7 @@ import { type CloudflareBindings } from '../lib/types';
 import { parseDevice, resolveDeviceTarget, resolveGeoTarget, evaluateStructuredRoutingRules } from '../lib/device';
 import { uid, now, sha256, getCountryName } from '../lib/utils';
 import { isFrontendMasterRequest } from '../middleware/auth';
+import { rateLimit } from '../middleware/ratelimit';
 import { isSafeExternalHttpUrl } from '../lib/schemas';
 import {
   REDIRECT_PIXEL_CSP,
@@ -64,6 +65,15 @@ function escapeHtml(str: string): string {
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#039;');
+}
+
+function safeInlineJson(value: unknown): string {
+  return JSON.stringify(value)
+    .replace(/</g, '\\u003c')
+    .replace(/>/g, '\\u003e')
+    .replace(/&/g, '\\u0026')
+    .replace(/\u2028/g, '\\u2028')
+    .replace(/\u2029/g, '\\u2029');
 }
 
 function isSocialBot(userAgent: string): boolean {
@@ -245,7 +255,7 @@ function passwordPage(slug: string, domainName: string, error = false): Response
     <h1>Lien protégé</h1>
     <p>Ce lien est protégé par un mot de passe. Veuillez le saisir pour continuer.</p>
     <form method="POST">
-      <input type="hidden" name="_domain" value="${domainName}">
+      <input type="hidden" name="_domain" value="${escapeHtml(domainName)}">
       <input type="password" name="password" placeholder="Mot de passe" autofocus autocomplete="current-password">
       ${error ? '<p class="error">Mot de passe incorrect. Réessayez.</p>' : ''}
       <button type="submit">Continuer →</button>
@@ -260,13 +270,14 @@ function passwordPage(slug: string, domainName: string, error = false): Response
 }
 
 // ─── Cloaked link & PathLock™ Viewer ──────────────────────────────────────────
-function cloakedPage(destination: string, title: string | null, slug: string = '', link?: CachedLink): Response {
+async function cloakedPage(destination: string, title: string | null, slug: string = '', link?: CachedLink): Promise<Response> {
   const safeDest = escapeHtml(destination);
   const safeTitle = escapeHtml(title || slug || 'LShorter — Lien Sécurisé');
   const safeSlug = escapeHtml(slug || '');
   const mode = link?.pathLockMode || link?.path_lock_mode || 'off';
   const isPathLocked = mode !== 'off';
-  const safePrefix = escapeHtml(link?.pathLockPrefix || link?.path_lock_prefix || '');
+  const rawPrefix = String(link?.pathLockPrefix || link?.path_lock_prefix || '');
+  const safePrefix = escapeHtml(rawPrefix);
   const cleanPrefix = safePrefix.replace(/^\/+/, '').replace(/\/+$/, '');
   const authorizedPath = cleanPrefix || safeSlug;
   const safeMessage = escapeHtml(
@@ -276,7 +287,8 @@ function cloakedPage(destination: string, title: string | null, slug: string = '
       ? 'Le propriétaire de ce lien a restreint la navigation à cette page unique. Toute navigation externe est bloquée.'
       : 'Le propriétaire de ce lien a restreint la navigation au tunnel d\'accès autorisé. Toute navigation externe est verrouillée.')
   );
-  const safePassword = escapeHtml(link?.pathLockPassword || link?.path_lock_password || '');
+  const rawPassword = String(link?.pathLockPassword || link?.path_lock_password || '');
+  const expectedPasswordHash = rawPassword ? await sha256(rawPassword) : '';
 
   let destOrigin = '';
   try {
@@ -582,7 +594,7 @@ function cloakedPage(destination: string, title: string | null, slug: string = '
       <div class="gate-divider"></div>
 
       ${
-        safePassword
+        expectedPasswordHash
           ? `<div class="dev-box">
                <div class="dev-header">
                  <span class="dev-header-left">
@@ -609,11 +621,11 @@ function cloakedPage(destination: string, title: string | null, slug: string = '
 
   <script>
     var isPathLocked = ${isPathLocked ? 'true' : 'false'};
-    var targetUrl = "${safeDest}";
-    var lockMode = "${mode}";
-    var lockPrefix = "${safePrefix}";
-    var slug = "${safeSlug}";
-    var expectedPassword = "${safePassword}";
+    var targetUrl = ${safeInlineJson(destination)};
+    var lockMode = ${safeInlineJson(mode)};
+    var lockPrefix = ${safeInlineJson(rawPrefix)};
+    var slug = ${safeInlineJson(slug || '')};
+    var expectedPasswordHash = ${safeInlineJson(expectedPasswordHash)};
 
     var isDevUnlocked = false;
     try {
@@ -690,19 +702,26 @@ function cloakedPage(destination: string, title: string | null, slug: string = '
       }
     }
 
-    function verifyDevPassword() {
+    async function verifyDevPassword() {
       var input = document.getElementById("unlock-pass");
       var err = document.getElementById("dev-error");
-      if (!input) return;
+      if (!input || !expectedPasswordHash) return;
       var val = input.value.trim();
-      if (val === expectedPassword) {
-        try { sessionStorage.setItem("pathlock_unlocked_" + slug, "true"); } catch(e){}
-        isDevUnlocked = true;
-        updateBadgeToUnlocked();
-        document.getElementById("blocking-gate").style.display = "none";
-      } else {
-        if (err) err.style.display = "block";
-      }
+      try {
+        var bytes = new TextEncoder().encode(val);
+        var digest = await crypto.subtle.digest("SHA-256", bytes);
+        var hashHex = Array.from(new Uint8Array(digest)).map(function(b) {
+          return b.toString(16).padStart(2, "0");
+        }).join("");
+        if (hashHex === expectedPasswordHash) {
+          try { sessionStorage.setItem("pathlock_unlocked_" + slug, "true"); } catch(e){}
+          isDevUnlocked = true;
+          updateBadgeToUnlocked();
+          document.getElementById("blocking-gate").style.display = "none";
+          return;
+        }
+      } catch(e) {}
+      if (err) err.style.display = "block";
     }
 
     function toggleEye() {
@@ -964,7 +983,9 @@ async function handleRedirect(
   }
 
   // 3. Password protection check
+  let authCookieToken = '';
   if (link.passwordHash) {
+    authCookieToken = await sha256(`${link.id}:${link.passwordHash}:${c.env.HASH_SALT || 'lsh_cookie_v1'}`);
     // POST = form submission with password
     if (c.req.method === 'POST') {
       const form = await c.req.formData().catch(() => null);
@@ -976,10 +997,13 @@ async function handleRedirect(
       }
       // Correct password — fall through to redirect below
     } else {
-      // GET — show password form unless valid cookie
+      // GET — show password form unless valid signed cookie
       const cookieHeader = c.req.header('cookie') ?? '';
       const cookieName   = `ql_auth_${link.id}`;
-      const hasCookie    = cookieHeader.includes(`${cookieName}=${link.passwordHash}`);
+      const hasCookie    = cookieHeader
+        .split(';')
+        .map((part) => part.trim())
+        .includes(`${cookieName}=${authCookieToken}`);
       if (!hasCookie) {
         return passwordPage(decodedSlug, domainName, false);
       }
@@ -1120,7 +1144,7 @@ async function handleRedirect(
     (link.path_lock_mode && link.path_lock_mode !== 'off')
   );
   if (link.isCloaked || isPathLocked) {
-    return cloakedPage(destination, link.metaTitle, decodedSlug, link);
+    return await cloakedPage(destination, link.metaTitle, decodedSlug, link);
   }
 
   // 7. Security Headers + Referrer hiding + Retargeting Pixels / Redirect
@@ -1133,9 +1157,9 @@ async function handleRedirect(
   }
 
   // Set auth cookie if password was just verified via POST
-  if (link.passwordHash && c.req.method === 'POST') {
+  if (link.passwordHash && authCookieToken && c.req.method === 'POST') {
     const isHttps = c.req.url.startsWith('https://');
-    headers['Set-Cookie'] = `ql_auth_${link.id}=${link.passwordHash}; Path=/; HttpOnly; SameSite=Lax; Max-Age=86400${isHttps ? '; Secure' : ''}`;
+    headers['Set-Cookie'] = `ql_auth_${link.id}=${authCookieToken}; Path=/; HttpOnly; SameSite=Lax; Max-Age=86400${isHttps ? '; Secure' : ''}`;
   }
 
   // 7.5 Retargeting Pixels Interstitial (9 official platforms: Meta, Instagram, Google, YouTube, TikTok, LinkedIn, Pinterest, Snapchat, X)
@@ -1174,8 +1198,26 @@ async function handleRedirect(
   });
 }
 
+// Brute-force protection on password form POST submissions (20 req/min per IP)
+const passwordFormRateLimit = rateLimit({ limit: 20, windowSeconds: 60, keyType: 'ip' });
+
 // ─── Named-domain route  GET|POST /r/:slug ────────────────────────────────────
-redirect.on(['GET', 'POST'], '/r/:slug', async (c) => {
+redirect.post('/r/:slug', passwordFormRateLimit, async (c) => {
+  const slug          = c.req.param('slug');
+  const host          = c.req.header('host') ?? c.env.DEFAULT_DOMAIN ?? 'lsho.cc';
+  const rawDomain     = host.split(':')[0];
+  const defaultDomain = c.env.DEFAULT_DOMAIN ?? 'lsho.cc';
+  const isDefaultOrWorker =
+    rawDomain.endsWith('.workers.dev') ||
+    rawDomain === defaultDomain ||
+    rawDomain === 'localhost' ||
+    rawDomain === '127.0.0.1';
+  const domainName = isDefaultOrWorker ? defaultDomain : rawDomain;
+
+  return handleRedirect(c, slug, domainName);
+});
+
+redirect.get('/r/:slug', async (c) => {
   const slug          = c.req.param('slug');
   const host          = c.req.header('host') ?? c.env.DEFAULT_DOMAIN ?? 'lsho.cc';
   const rawDomain     = host.split(':')[0];
@@ -1191,7 +1233,25 @@ redirect.on(['GET', 'POST'], '/r/:slug', async (c) => {
 });
 
 // ─── Direct /:slug fallback ──────────────────────────────────────────────────
-redirect.on(['GET', 'POST'], '/:slug', async (c) => {
+redirect.post('/:slug', passwordFormRateLimit, async (c) => {
+  const slug = c.req.param('slug');
+  if (slug === 'api' || slug === 'health' || slug === 'favicon.ico') {
+    return c.text('Not found', 404);
+  }
+  const host = c.req.header('host') ?? c.env.DEFAULT_DOMAIN ?? 'lsho.cc';
+  const rawDomain = host.split(':')[0];
+  const defaultDomain = c.env.DEFAULT_DOMAIN ?? 'lsho.cc';
+  const isDefaultOrWorker =
+    rawDomain.endsWith('.workers.dev') ||
+    rawDomain === defaultDomain ||
+    rawDomain === 'localhost' ||
+    rawDomain === '127.0.0.1';
+  const domainName = isDefaultOrWorker ? defaultDomain : rawDomain;
+
+  return handleRedirect(c, slug, domainName);
+});
+
+redirect.get('/:slug', async (c) => {
   const slug = c.req.param('slug');
   if (slug === 'api' || slug === 'health' || slug === 'favicon.ico') {
     return c.text('Not found', 404);

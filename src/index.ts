@@ -375,9 +375,8 @@ app.notFound((c) =>
 
 app.onError((error, c) => {
   console.error("[QuickLink] Unhandled error:", error);
-  const msg = error instanceof Error ? error.message : String(error);
   return err(
-    msg || "Internal server error. Please try again later.",
+    "Internal server error. Please try again later.",
     500,
     "INTERNAL_ERROR",
   );

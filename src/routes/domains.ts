@@ -43,7 +43,7 @@ domains.post(
       `SELECT COUNT(*) as n FROM custom_domains WHERE user_id = ?`
     ).bind(userId).first<{ n: number }>();
 
-    if ((usedRow?.n ?? 0) >= maxDomains) {
+    if (maxDomains !== -1 && (usedRow?.n ?? 0) >= maxDomains) {
       return err(
         `Domain limit reached (${usedRow?.n ?? 0}/${maxDomains}) for plan ${plan}. Upgrade to add more.`,
         403,
@@ -221,10 +221,17 @@ domains.post('/:id/verify', async (c) => {
       .filter((a: any) => a.type === 5)
       .map((a: any) => String(a.data || '').trim().toLowerCase().replace(/\.$/, ''));
 
-    const txtVerified = txtAnswers.some((v: string) => v.includes('lshorter-verify='));
-    const cnameVerified = cnameAnswers.some(
-      (v: string) => v.includes('lshorter') || v.includes('lsho.cc') || v.includes('workers.dev')
-    );
+    const defaultDomainLower = (c.env.DEFAULT_DOMAIN || 'lsho.cc').trim().toLowerCase();
+    const ALLOWED_CNAME_TARGETS = new Set([
+      defaultDomainLower,
+      'lsho.cc',
+      'cname.lsho.cc',
+      'cname.lshorter.cc',
+      'lshorter-api.fiatechnologiecam.workers.dev',
+    ]);
+
+    const txtVerified = txtAnswers.some((v: string) => v.includes(expectedTxtValue));
+    const cnameVerified = cnameAnswers.some((v: string) => ALLOWED_CNAME_TARGETS.has(v));
 
     if (txtVerified || cnameVerified) {
       await c.env.DB.prepare(`UPDATE custom_domains SET status = 'active' WHERE id = ? AND user_id = ?`)
@@ -232,6 +239,7 @@ domains.post('/:id/verify', async (c) => {
         .run();
       return ok({
         id: row.id,
+        domain: row.domain_name,
         domain_name: row.domain_name,
         verified: true,
         status: 'active',

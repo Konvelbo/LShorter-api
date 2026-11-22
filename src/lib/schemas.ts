@@ -597,8 +597,11 @@ const SELF_WEBHOOK_HOSTS = new Set([
 const safeWebhookUrl = safeUrl.refine(
   (u) => {
     try {
-      const host = new URL(u).hostname.toLowerCase();
-      return !SELF_WEBHOOK_HOSTS.has(host);
+      const host = new URL(u).hostname.toLowerCase().replace(/\.$/, "");
+      if (SELF_WEBHOOK_HOSTS.has(host) || host.endsWith(".lsho.cc")) {
+        return false;
+      }
+      return true;
     } catch {
       return false;
     }

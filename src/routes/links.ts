@@ -8,11 +8,45 @@ import {
   type AuthContext,
   PLAN_LIMITS,
 } from "../lib/types";
-import { authMiddleware, isFrontendAuth } from "../middleware/auth";
+import { authMiddleware, isFrontendAuth, isFrontendMasterRequest } from "../middleware/auth";
 import { rateLimit } from "../middleware/ratelimit";
 import { CreateLinkSchema, UpdateLinkSchema } from "../lib/schemas";
 import { uid, randomSlug, isSafeUrl, ok, err, now, sha256, getCountryName } from "../lib/utils";
 import { parseDevice } from "../lib/device";
+
+const RESERVED_SLUGS = new Set([
+  "api",
+  "admin",
+  "health",
+  "login",
+  "dashboard",
+  "static",
+  "r",
+  "auth",
+  "onboarding",
+  "terms",
+  "privacy",
+  "settings",
+  "billing",
+  "assets",
+  "favicon",
+]);
+
+function isSelfReferencingTarget(targetUrl: string, defaultDomain: string, resolvedDomain: string): boolean {
+  try {
+    const host = new URL(targetUrl).hostname.toLowerCase().replace(/\.$/, "");
+    const defDom = defaultDomain.toLowerCase().replace(/\.$/, "");
+    const resDom = resolvedDomain.toLowerCase().replace(/\/.*$/, "").replace(/\.$/, "");
+    return (
+      host === defDom ||
+      host.endsWith(`.${defDom}`) ||
+      host === resDom ||
+      host === "lshorter-api.fiatechnologiecam.workers.dev"
+    );
+  } catch {
+    return true;
+  }
+}
 
 function sanitizePixelIds(raw: unknown): string[] | null {
   if (!Array.isArray(raw)) return null;
@@ -82,8 +116,16 @@ function resolveBannerStyle(input: {
 }
 
 
-// ─── POST /api/v1/links/:slug/click (Public/Frontend Click Tracker) ───────────
+// ─── POST /api/v1/links/:slug/click (Internal Frontend Redirect Tracker Only) ─
 links.post("/:slug/click", async (c) => {
+  if (!isFrontendMasterRequest(c)) {
+    return err(
+      "Forbidden: click tracking ingestion is restricted to the LShorter edge redirect engine.",
+      403,
+      "FORBIDDEN",
+    );
+  }
+
   const slugParam = c.req.param("slug");
   const decodedSlug = decodeURIComponent(slugParam).trim();
 
@@ -442,23 +484,6 @@ links.post(
           : 1;
 
     // Reserved slugs check
-    const RESERVED_SLUGS = new Set([
-      "api",
-      "admin",
-      "health",
-      "login",
-      "dashboard",
-      "static",
-      "r",
-      "auth",
-      "onboarding",
-      "terms",
-      "privacy",
-      "settings",
-      "billing",
-      "assets",
-      "favicon",
-    ]);
     if (slug && RESERVED_SLUGS.has(slug.toLowerCase().trim())) {
       return err(
         `The slug "${slug}" is reserved and cannot be used.`,
@@ -488,20 +513,12 @@ links.post(
 
     // Infinite redirect check
     const defaultDom = (c.env.DEFAULT_DOMAIN || "lsho.cc").toLowerCase();
-    try {
-      const parsedTarget = new URL(targetUrl);
-      if (
-        parsedTarget.hostname.toLowerCase() === defaultDom ||
-        parsedTarget.hostname.toLowerCase() === resolvedDomain.toLowerCase()
-      ) {
-        return err(
-          "Self-referencing redirect target is forbidden.",
-          400,
-          "INFINITE_REDIRECT",
-        );
-      }
-    } catch {
-      return err("Invalid target URL format", 400, "INVALID_URL");
+    if (isSelfReferencingTarget(targetUrl, defaultDom, resolvedDomain)) {
+      return err(
+        "Self-referencing redirect target is forbidden.",
+        400,
+        "INFINITE_REDIRECT",
+      );
     }
 
     // Plan constraints check for targeting rules — FORBIDDEN on FREEMIUM
@@ -1004,12 +1021,32 @@ links.patch("/:id", async (c) => {
   const bindings: unknown[] = [now()];
 
   if (updates.targetUrl !== undefined) {
+    const defaultDom = (c.env.DEFAULT_DOMAIN || "lsho.cc").toLowerCase();
+    const linkDomain = existing.domain_name || defaultDom;
+    if (isSelfReferencingTarget(updates.targetUrl, defaultDom, linkDomain)) {
+      return err(
+        "Self-referencing redirect target is forbidden.",
+        400,
+        "INFINITE_REDIRECT",
+      );
+    }
     setParts.push("target_url = ?");
     bindings.push(updates.targetUrl);
   }
   if (updates.slug !== undefined) {
+    const cleanSlug = updates.slug.trim();
+    if (RESERVED_SLUGS.has(cleanSlug.toLowerCase())) {
+      return err(
+        `The slug "${cleanSlug}" is reserved and cannot be used.`,
+        400,
+        "RESERVED_SLUG",
+      );
+    }
+    const linkDomain = existing.domain_name || c.env.DEFAULT_DOMAIN || "lsho.cc";
     setParts.push("slug = ?");
-    bindings.push(updates.slug);
+    bindings.push(cleanSlug);
+    setParts.push("short_url = ?");
+    bindings.push(`https://${linkDomain}/${cleanSlug}`);
   }
   if (
     updates.geoTargeting !== undefined ||
@@ -1308,9 +1345,21 @@ links.patch("/:id", async (c) => {
   }
 
   bindings.push(id);
-  await c.env.DB.prepare(`UPDATE links SET ${setParts.join(", ")} WHERE id = ?`)
-    .bind(...bindings)
-    .run();
+  try {
+    await c.env.DB.prepare(`UPDATE links SET ${setParts.join(", ")} WHERE id = ?`)
+      .bind(...bindings)
+      .run();
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : String(e);
+    if (msg.includes("UNIQUE")) {
+      return err(
+        `Slug "${updates.slug}" already taken on domain "${existing.domain_name}"`,
+        409,
+        "SLUG_CONFLICT",
+      );
+    }
+    throw e;
+  }
 
   const updated = await c.env.DB.prepare(`SELECT * FROM links WHERE id = ?`)
     .bind(id)
@@ -1483,8 +1532,8 @@ links.get("/", async (c) => {
   const auth = c.get("auth");
   const { userId } = auth;
   const isFrontend = isFrontendAuth(auth);
-  const page = Math.max(1, parseInt(c.req.query("page") ?? "1", 10));
-  const limit = Math.min(100, parseInt(c.req.query("limit") ?? "20", 10));
+  const page = Math.max(1, parseInt(c.req.query("page") ?? "1", 10) || 1);
+  const limit = Math.max(1, Math.min(100, parseInt(c.req.query("limit") ?? "20", 10) || 20));
   const offset = (page - 1) * limit;
   const tagFilter = c.req.query("tag");
 
