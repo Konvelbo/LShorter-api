@@ -7,6 +7,14 @@ import { Context, Hono } from 'hono';
 import { type CloudflareBindings } from '../lib/types';
 import { parseDevice, resolveDeviceTarget, resolveGeoTarget, evaluateStructuredRoutingRules } from '../lib/device';
 import { uid, now, sha256, getCountryName } from '../lib/utils';
+import { isFrontendMasterRequest } from '../middleware/auth';
+import { isSafeExternalHttpUrl } from '../lib/schemas';
+import {
+  REDIRECT_PIXEL_CSP,
+  resolveRedirectActivePixels,
+  incrementRedirectPixelCounts,
+  renderRedirectPixelInterstitialHtml,
+} from '../lib/pixels';
 
 interface CachedLink {
   id: string;
@@ -43,6 +51,8 @@ interface CachedLink {
   is_active?:       number;
   expiresAt?:       string | null;
   expires_at?:      string | null;
+  pixels?:          unknown;
+  pixel_ids?:       unknown;
 }
 
 const redirect = new Hono<{ Bindings: CloudflareBindings }>();
@@ -67,7 +77,8 @@ function isSocialBot(userAgent: string): boolean {
     ua.includes('telegrambot') ||
     ua.includes('slackbot') ||
     ua.includes('vkshare') ||
-    ua.includes('pinterest') ||
+    ua.includes('pinterestbot') ||
+    (ua.includes('pinterest/') && ua.includes('bot')) ||
     ua.includes('applebot') ||
     ua.includes('bingbot') ||
     ua.includes('googlebot') ||
@@ -810,7 +821,7 @@ async function handleRedirect(
         `SELECT id, user_id, target_url, routing_rules, geo_targeting, device_targeting,
                 is_active, expires_at, password_hash, is_cloaked, hide_referrer, meta_title,
                 og_title, og_description, og_image, twitter_card, banner_style, clicks_count, max_clicks, fallback_url,
-                path_lock_mode, path_lock_prefix, path_lock_message, path_lock_password
+                path_lock_mode, path_lock_prefix, path_lock_message, path_lock_password, pixels
          FROM links
          WHERE (slug = ? OR slug = ? OR slug = ? OR LOWER(slug) = LOWER(?) OR LOWER(slug) = LOWER(?))
          ORDER BY created_at DESC
@@ -883,6 +894,8 @@ async function handleRedirect(
       path_lock_message: row.path_lock_message || null,
       pathLockPassword: row.path_lock_password || null,
       path_lock_password: row.path_lock_password || null,
+      pixels:          row.pixels ? (typeof row.pixels === 'string' ? JSON.parse(row.pixels) : row.pixels) : [],
+      pixel_ids:       row.pixels ? (typeof row.pixels === 'string' ? JSON.parse(row.pixels) : row.pixels) : [],
     };
 
     // Warm multi-key KV cache so future requests never query D1
@@ -943,7 +956,7 @@ async function handleRedirect(
     const fallbackTarget = liveLink?.fallback_url || link.fallbackUrl || link.fallback_url;
 
     if (liveMax > 0 && liveClicks >= liveMax) {
-      if (fallbackTarget) {
+      if (fallbackTarget && isSafeExternalHttpUrl(fallbackTarget)) {
         return c.redirect(fallbackTarget, 307);
       }
       return c.text('This link has reached its maximum access limit.', 410);
@@ -1023,12 +1036,10 @@ async function handleRedirect(
     return socialPreviewPage(link, destination, fullShortUrl);
   }
 
-  const reqFrontendSecret = c.req.header('x-frontend-secret');
-  const expectedFrontendSecret = c.env.FRONTEND_API_SECRET || 'lsh_secret_live_prod_2026';
   const isInternalProbe =
     c.req.header('x-internal-probe') === '1' ||
     c.req.header('x-crawler-prewarm') === '1' ||
-    Boolean(reqFrontendSecret && reqFrontendSecret === expectedFrontendSecret);
+    isFrontendMasterRequest(c);
   const purposeHeader = (c.req.header('purpose') || c.req.header('sec-purpose') || c.req.header('x-purpose') || c.req.header('x-moz') || '').toLowerCase();
   const isPrefetch = purposeHeader.includes('prefetch') || isInternalProbe;
 
@@ -1098,6 +1109,11 @@ async function handleRedirect(
     }
   }
 
+  // Defense-in-depth: never redirect or frame a dangerous protocol / internal SSRF destination
+  if (!isSafeExternalHttpUrl(destination)) {
+    return c.text('Blocked unsafe destination URL.', 400);
+  }
+
   // 6. Link Cloaking & PathLock™ — serve isolated viewer instead of redirect
   const isPathLocked = Boolean(
     (link.pathLockMode && link.pathLockMode !== 'off') ||
@@ -1107,7 +1123,7 @@ async function handleRedirect(
     return cloakedPage(destination, link.metaTitle, decodedSlug, link);
   }
 
-  // 7. Security Headers + Referrer hiding + redirect
+  // 7. Security Headers + Referrer hiding + Retargeting Pixels / Redirect
   const headers: Record<string, string> = {
     'X-Content-Type-Options': 'nosniff',
     'X-Frame-Options': 'SAMEORIGIN',
@@ -1118,7 +1134,38 @@ async function handleRedirect(
 
   // Set auth cookie if password was just verified via POST
   if (link.passwordHash && c.req.method === 'POST') {
-    headers['Set-Cookie'] = `ql_auth_${link.id}=${link.passwordHash}; Path=/; HttpOnly; SameSite=Lax; Max-Age=86400`;
+    const isHttps = c.req.url.startsWith('https://');
+    headers['Set-Cookie'] = `ql_auth_${link.id}=${link.passwordHash}; Path=/; HttpOnly; SameSite=Lax; Max-Age=86400${isHttps ? '; Secure' : ''}`;
+  }
+
+  // 7.5 Retargeting Pixels Interstitial (9 official platforms: Meta, Instagram, Google, YouTube, TikTok, LinkedIn, Pinterest, Snapchat, X)
+  if (!isPrefetch && !isInternalProbe) {
+    const activePixels = await resolveRedirectActivePixels(c.env.DB, link);
+    if (activePixels.length > 0) {
+      const incrementPromise = incrementRedirectPixelCounts(c.env.DB, activePixels);
+      try {
+        c.executionCtx.waitUntil(incrementPromise);
+      } catch {
+        incrementPromise.catch(() => {});
+      }
+
+      const html = renderRedirectPixelInterstitialHtml(
+        destination,
+        activePixels,
+        link.ogTitle || link.metaTitle,
+      );
+
+      return new Response(html, {
+        status: 200,
+        headers: {
+          ...headers,
+          'Content-Type': 'text/html; charset=utf-8',
+          'Content-Security-Policy': REDIRECT_PIXEL_CSP,
+          'Cache-Control': 'no-store, no-cache, must-revalidate, max-age=0',
+          'X-Robots-Tag': 'noindex, nofollow',
+        },
+      });
+    }
   }
 
   return new Response(null, {

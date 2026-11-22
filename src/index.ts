@@ -7,8 +7,9 @@ import { cors } from "hono/cors";
 import { logger } from "hono/logger";
 import { secureHeaders } from "hono/secure-headers";
 
-import { type CloudflareBindings } from "./lib/types";
+import { type CloudflareBindings, type AuthContext } from "./lib/types";
 import { err } from "./lib/utils";
+import { authMiddleware } from "./middleware/auth";
 import { rateLimit } from "./middleware/ratelimit";
 import redirectRouter from "./routes/redirect";
 
@@ -23,7 +24,10 @@ import targetsRouter from "./routes/targets";
 
 // ─── App ──────────────────────────────────────────────────────────────────────
 
-const app = new Hono<{ Bindings: CloudflareBindings }>();
+const app = new Hono<{
+  Bindings: CloudflareBindings;
+  Variables: { auth: AuthContext };
+}>();
 
 // ─── Global Middleware ────────────────────────────────────────────────────────
 
@@ -123,9 +127,42 @@ app.get("/", (c) =>
 app.get("/health", healthHandler);
 app.get("/api/v1/health", healthHandler);
 
+const MAX_IMAGE_UPLOAD_BYTES = 5 * 1024 * 1024; // 5 MB
+
+const ALLOWED_UPLOAD_MIMES: Record<string, { ext: string; mime: string }> = {
+  "image/png":  { ext: "png",  mime: "image/png" },
+  "image/jpeg": { ext: "jpg",  mime: "image/jpeg" },
+  "image/jpg":  { ext: "jpg",  mime: "image/jpeg" },
+  "image/webp": { ext: "webp", mime: "image/webp" },
+  "image/gif":  { ext: "gif",  mime: "image/gif" },
+};
+
+function hasValidImageMagicBytes(bytes: Uint8Array, mime: string): boolean {
+  if (mime === "image/png") {
+    return bytes.length >= 8 && bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47;
+  }
+  if (mime === "image/jpeg") {
+    return bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff;
+  }
+  if (mime === "image/gif") {
+    return bytes.length >= 6 && bytes[0] === 0x47 && bytes[1] === 0x49 && bytes[2] === 0x46 && bytes[3] === 0x38;
+  }
+  if (mime === "image/webp") {
+    return (
+      bytes.length >= 12 &&
+      bytes[0] === 0x52 && bytes[1] === 0x49 && bytes[2] === 0x46 && bytes[3] === 0x46 &&
+      bytes[8] === 0x57 && bytes[9] === 0x45 && bytes[10] === 0x42 && bytes[11] === 0x50
+    );
+  }
+  return false;
+}
+
 // ─── Public Image Asset Server for Social Previews & Banners ─────────────────
 app.on(["GET", "HEAD"], "/api/v1/images/:id", async (c) => {
   const id = c.req.param("id");
+  if (!/^[a-zA-Z0-9._-]{1,120}$/.test(id)) {
+    return c.text("Invalid image ID", 400);
+  }
 
   // 1. Try KV first
   let data: ArrayBuffer | null = await c.env.URL_KV.get(`image:${id}`, "arrayBuffer").catch(() => null);
@@ -146,8 +183,9 @@ app.on(["GET", "HEAD"], "/api/v1/images/:id", async (c) => {
     ).bind(id).first<{ mime_type: string; data: string }>().catch(() => null);
 
     if (row?.data) {
-      mimeType = row.mime_type || mimeType;
-      const base64Clean = row.data.replace(/^data:image\/[a-z]+;base64,/, "");
+      const safeMeta = ALLOWED_UPLOAD_MIMES[(row.mime_type || "").toLowerCase()];
+      mimeType = safeMeta?.mime || mimeType;
+      const base64Clean = row.data.replace(/^data:image\/[a-z0-9.+-]+;base64,/i, "");
       const binaryStr = atob(base64Clean);
       const bytes = new Uint8Array(binaryStr.length);
       for (let i = 0; i < binaryStr.length; i++) {
@@ -170,6 +208,8 @@ app.on(["GET", "HEAD"], "/api/v1/images/:id", async (c) => {
     "Content-Type": mimeType,
     "Content-Length": String(data.byteLength),
     "Cache-Control": "public, max-age=31536000, immutable",
+    "X-Content-Type-Options": "nosniff",
+    "Content-Security-Policy": "default-src 'none'; sandbox",
     "Access-Control-Allow-Origin": "*",
     "Access-Control-Allow-Methods": "GET, HEAD, OPTIONS",
     "Cross-Origin-Resource-Policy": "cross-origin",
@@ -184,81 +224,131 @@ app.on(["GET", "HEAD"], "/api/v1/images/:id", async (c) => {
   return new Response(data, { status: 200, headers });
 });
 
-// ─── Image Upload Endpoint for Banners & Logos (D1 Backed) ───────────────────
-app.post("/api/v1/upload-image", async (c) => {
-  try {
-    let base64String = "";
-    let ext = "png";
-    let mimeType = "image/png";
-
-    const contentType = c.req.header("content-type") || "";
-
-    if (contentType.includes("application/json")) {
-      const json = await c.req.json().catch(() => null);
-      if (json?.data) {
-        base64String = json.data;
-        if (json.data.includes("image/jpeg") || json.data.includes("image/jpg")) { ext = "jpg"; mimeType = "image/jpeg"; }
-        if (json.data.includes("image/webp")) { ext = "webp"; mimeType = "image/webp"; }
-        if (json.data.includes("image/gif")) { ext = "gif"; mimeType = "image/gif"; }
-      }
-    } else {
-      const body = await c.req.parseBody().catch(() => null);
-      const file = body?.file;
-      if (file && typeof file === "object" && "arrayBuffer" in file) {
-        const arrayBuf = await (file as any).arrayBuffer();
-        const bytes = new Uint8Array(arrayBuf);
-        let binary = "";
-        for (let i = 0; i < bytes.byteLength; i++) {
-          binary += String.fromCharCode(bytes[i]);
-        }
-        base64String = `data:${(file as any).type || "image/png"};base64,${btoa(binary)}`;
-        const fileName = (file as any).name || "";
-        if (fileName.endsWith(".jpg") || fileName.endsWith(".jpeg")) { ext = "jpg"; mimeType = "image/jpeg"; }
-        if (fileName.endsWith(".webp")) { ext = "webp"; mimeType = "image/webp"; }
-        if (fileName.endsWith(".gif")) { ext = "gif"; mimeType = "image/gif"; }
-      }
-    }
-
-    if (!base64String) {
-      return c.json({ success: false, error: "No image file or data provided" }, 400);
-    }
-
-    const imageId = `banner_${Date.now()}_${Math.random().toString(36).substring(2, 7)}.${ext}`;
-
-    // Ensure table exists in Cloudflare D1
-    await c.env.DB.prepare(
-      `CREATE TABLE IF NOT EXISTS uploaded_images (
-         id TEXT PRIMARY KEY,
-         mime_type TEXT,
-         data TEXT,
-         created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-       )`
-    ).run().catch(() => {});
-
-    // Save permanently in Cloudflare D1
-    await c.env.DB.prepare(
-      `INSERT OR REPLACE INTO uploaded_images (id, mime_type, data) VALUES (?, ?, ?)`
-    ).bind(imageId, mimeType, base64String).run();
-
-    // Also cache in Cloudflare KV if available
+// ─── Image Upload Endpoint for Banners & Logos (Authenticated + Strict MIME) ─
+app.post(
+  "/api/v1/upload-image",
+  authMiddleware,
+  rateLimit({ limit: 30, windowSeconds: 60, keyType: "apiKey" }),
+  async (c) => {
     try {
-      if (c.env.URL_KV) {
-        const commaIdx = base64String.indexOf(",");
-        const rawB64 = commaIdx !== -1 ? base64String.substring(commaIdx + 1) : base64String;
-        const binaryStr = atob(rawB64);
-        const bytes = new Uint8Array(binaryStr.length);
-        for (let i = 0; i < binaryStr.length; i++) bytes[i] = binaryStr.charCodeAt(i);
-        await c.env.URL_KV.put(`image:${imageId}`, bytes.buffer);
-      }
-    } catch {}
+      let bytes: Uint8Array | null = null;
+      let rawMime = "";
 
-    const publicUrl = `https://lshorter-api.fiatechnologiecam.workers.dev/api/v1/images/${imageId}`;
-    return c.json({ success: true, url: publicUrl, imageId });
-  } catch (err: any) {
-    console.error("Upload error:", err);
-    return c.json({ success: false, error: err?.message || "Upload failed" }, 500);
-  }
-});
+      const contentType = c.req.header("content-type") || "";
+
+      if (contentType.includes("application/json")) {
+        const json = await c.req.json().catch(() => null);
+        const rawData = typeof json?.data === "string" ? json.data.trim() : "";
+        if (!rawData) {
+          return c.json({ success: false, error: "No image file or data provided" }, 400);
+        }
+
+        const dataUriMatch = rawData.match(/^data:([^;,]+);base64,([A-Za-z0-9+/=\s]+)$/i);
+        if (!dataUriMatch) {
+          return c.json(
+            { success: false, error: "Invalid image format. Expected base64 Data URI with an allowed image MIME type." },
+            400,
+          );
+        }
+
+        rawMime = dataUriMatch[1].toLowerCase().trim();
+        const b64Clean = dataUriMatch[2].replace(/\s+/g, "");
+        if (b64Clean.length > Math.ceil(MAX_IMAGE_UPLOAD_BYTES * 1.4)) {
+          return c.json({ success: false, error: "Image exceeds 5MB size limit" }, 413);
+        }
+
+        let binaryStr: string;
+        try {
+          binaryStr = atob(b64Clean);
+        } catch {
+          return c.json({ success: false, error: "Malformed base64 image payload" }, 400);
+        }
+        if (binaryStr.length > MAX_IMAGE_UPLOAD_BYTES) {
+          return c.json({ success: false, error: "Image exceeds 5MB size limit" }, 413);
+        }
+        bytes = new Uint8Array(binaryStr.length);
+        for (let i = 0; i < binaryStr.length; i++) {
+          bytes[i] = binaryStr.charCodeAt(i);
+        }
+      } else {
+        const body = await c.req.parseBody().catch(() => null);
+        const file = body?.file;
+        if (file && typeof file === "object" && "arrayBuffer" in file) {
+          const fileSize = Number((file as any).size || 0);
+          if (fileSize > MAX_IMAGE_UPLOAD_BYTES) {
+            return c.json({ success: false, error: "Image exceeds 5MB size limit" }, 413);
+          }
+          const arrayBuf = await (file as any).arrayBuffer();
+          if (arrayBuf.byteLength > MAX_IMAGE_UPLOAD_BYTES) {
+            return c.json({ success: false, error: "Image exceeds 5MB size limit" }, 413);
+          }
+          bytes = new Uint8Array(arrayBuf);
+          rawMime = String((file as any).type || "").toLowerCase().trim();
+        }
+      }
+
+      if (!bytes || bytes.byteLength === 0) {
+        return c.json({ success: false, error: "No image file or data provided" }, 400);
+      }
+
+      const allowed = ALLOWED_UPLOAD_MIMES[rawMime];
+      if (!allowed) {
+        return c.json(
+          {
+            success: false,
+            error: "Unsupported file type. Only PNG, JPEG, WEBP, and GIF images are allowed.",
+          },
+          400,
+        );
+      }
+
+      if (!hasValidImageMagicBytes(bytes, allowed.mime)) {
+        return c.json(
+          {
+            success: false,
+            error: "Image file signature does not match declared MIME type.",
+          },
+          400,
+        );
+      }
+
+      let binary = "";
+      for (let i = 0; i < bytes.byteLength; i++) {
+        binary += String.fromCharCode(bytes[i]);
+      }
+      const base64String = `data:${allowed.mime};base64,${btoa(binary)}`;
+      const imageId = `banner_${Date.now()}_${Math.random().toString(36).substring(2, 7)}.${allowed.ext}`;
+
+      // Ensure table exists in Cloudflare D1
+      await c.env.DB.prepare(
+        `CREATE TABLE IF NOT EXISTS uploaded_images (
+           id TEXT PRIMARY KEY,
+           mime_type TEXT,
+           data TEXT,
+           created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+         )`
+      ).run().catch(() => {});
+
+      // Save permanently in Cloudflare D1
+      await c.env.DB.prepare(
+        `INSERT OR REPLACE INTO uploaded_images (id, mime_type, data) VALUES (?, ?, ?)`
+      ).bind(imageId, allowed.mime, base64String).run();
+
+      // Also cache in Cloudflare KV if available
+      try {
+        if (c.env.URL_KV) {
+          await c.env.URL_KV.put(`image:${imageId}`, bytes);
+        }
+      } catch {}
+
+      const publicUrl = `https://lshorter-api.fiatechnologiecam.workers.dev/api/v1/images/${imageId}`;
+      return c.json({ success: true, url: publicUrl, imageId });
+    } catch (uploadErr: any) {
+      console.error("Upload error:", uploadErr);
+      return c.json({ success: false, error: uploadErr?.message || "Upload failed" }, 500);
+    }
+  },
+);
 
 // ─── API v1 Routes ────────────────────────────────────────────────────────────
 

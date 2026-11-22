@@ -4,7 +4,7 @@
 
 import { Hono } from "hono";
 import { type CloudflareBindings, type AuthContext } from "../lib/types";
-import { authMiddleware } from "../middleware/auth";
+import { authMiddleware, isFrontendAuth } from "../middleware/auth";
 import { CreateTargetAlertSchema, UpdateTargetAlertSchema } from "../lib/schemas";
 import { uid, ok, err, now } from "../lib/utils";
 
@@ -42,34 +42,14 @@ async function ensureTargetAlertsTable(db: D1Database) {
   } catch {}
 }
 
-// Allow Frontend secret or Bearer Auth
-targets.use("*", async (c, next) => {
-  const secret =
-    c.req.header("X-Frontend-Secret") ||
-    c.req.header("Authorization")?.replace("Bearer ", "");
-  const expected = c.env.FRONTEND_API_SECRET || "lsh_secret_live_prod_2026";
-  const qUserId = c.req.query("userId") || c.req.header("X-User-Id");
-
-  const validSecrets = new Set([
-    expected,
-    "test_secret",
-    "lsh_secret_live_prod_2026",
-  ]);
-
-  if (secret && validSecrets.has(secret)) {
-    if (qUserId) {
-      c.set("auth", { userId: qUserId, plan: "PRO", keyId: "internal", role: "admin" } as any);
-      return next();
-    }
-  }
-  return authMiddleware(c, next);
-});
+// Strict authentication (Dashboard secret OR valid hashed Bearer API key)
+targets.use("*", authMiddleware);
 
 // ─── GET /api/v1/targets (List alerts for user) ──────────────────────────────
 targets.get("/", async (c) => {
   const auth = c.get("auth");
   const qUserId = c.req.query("userId") || c.req.header("X-User-Id");
-  const userId = qUserId && (auth.role === "admin" || qUserId === auth.userId) ? qUserId : auth.userId;
+  const userId = isFrontendAuth(auth) && qUserId ? qUserId : auth.userId;
 
   await ensureTargetAlertsTable(c.env.DB);
 
@@ -156,23 +136,18 @@ targets.get("/", async (c) => {
   return ok(alerts);
 });
 
-// ─── POST /api/v1/targets (Create or Upsert alert) ───────────────────────────
+// ─── POST /api/v1/targets (Create or Upsert alert — Dashboard ONLY) ──────────
 targets.post("/", async (c) => {
   const auth = c.get("auth");
   const qUserId = c.req.query("userId") || c.req.header("X-User-Id");
-  const expectedSecret = c.env.FRONTEND_API_SECRET || "lsh_secret_live_prod_2026";
-  const headerSecret = c.req.header("X-Frontend-Secret");
-  const isInternal = Boolean(
-    (headerSecret && (headerSecret === expectedSecret || headerSecret === "test_secret" || headerSecret === "lsh_secret_live_prod_2026")) ||
-    auth.keyId === "internal"
-  );
+  const isInternal = isFrontendAuth(auth);
 
   // The SDK / API keys must NOT be allowed to create notifications:
-  if (auth.keyId && auth.keyId !== "internal" && !isInternal) {
+  if (!isInternal) {
     return err(
       "Creating target alerts and notifications via the SDK / API keys is disabled. Notifications must be configured directly from the LShorter Dashboard.",
       403,
-      "FORBIDDEN"
+      "FORBIDDEN_SDK_CREATE"
     );
   }
 
@@ -192,7 +167,7 @@ targets.post("/", async (c) => {
     );
   }
 
-  const userId = body.userId || (qUserId && auth.role === "admin" ? qUserId : auth.userId);
+  const userId = body.userId || qUserId || auth.userId;
   await ensureTargetAlertsTable(c.env.DB);
 
   // Handle "both" metric type (clicks & revenue) by decomposing into two records
@@ -365,9 +340,10 @@ targets.post("/", async (c) => {
 // ─── PATCH /api/v1/targets/:id (Update alert) ────────────────────────────────
 targets.patch("/:id", async (c) => {
   const auth = c.get("auth");
+  const isFrontend = isFrontendAuth(auth);
   const id = c.req.param("id");
   const qUserId = c.req.query("userId") || c.req.header("X-User-Id");
-  const userId = qUserId && auth.role === "admin" ? qUserId : auth.userId;
+  const userId = isFrontend && qUserId ? qUserId : auth.userId;
 
   let body: any = {};
   try {
@@ -393,7 +369,7 @@ targets.patch("/:id", async (c) => {
   ).bind(id).first<{ id: string; user_id: string; link_id: string | null; period: string; notify_email: number; notify_bell: number }>();
 
   if (!alert) return err("Target alert not found", 404, "NOT_FOUND");
-  if (alert.user_id !== userId && auth.role !== "admin") {
+  if (!isFrontend && alert.user_id !== userId) {
     return err("Forbidden: alert does not belong to your account", 403, "FORBIDDEN");
   }
 
@@ -470,9 +446,10 @@ targets.patch("/:id", async (c) => {
 // ─── DELETE /api/v1/targets/:id (Delete alert) ───────────────────────────────
 targets.delete("/:id", async (c) => {
   const auth = c.get("auth");
+  const isFrontend = isFrontendAuth(auth);
   const id = c.req.param("id");
   const qUserId = c.req.query("userId") || c.req.header("X-User-Id");
-  const userId = qUserId && auth.role === "admin" ? qUserId : auth.userId;
+  const userId = isFrontend && qUserId ? qUserId : auth.userId;
 
   await ensureTargetAlertsTable(c.env.DB);
 
@@ -481,7 +458,7 @@ targets.delete("/:id", async (c) => {
   ).bind(id).first<{ id: string; user_id: string; link_id: string | null }>();
 
   if (!alert) return err("Target alert not found", 404, "NOT_FOUND");
-  if (alert.user_id !== userId && auth.role !== "admin") {
+  if (!isFrontend && alert.user_id !== userId) {
     return err("Forbidden: alert does not belong to your account", 403, "FORBIDDEN");
   }
 

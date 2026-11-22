@@ -29,28 +29,8 @@ export function invalidateWorkerAnalyticsCache(userId?: string) {
   }
 }
 
-// Optional inter-service secret or standard Bearer auth
-analytics.use("*", async (c, next) => {
-  const secret =
-    c.req.header("X-Frontend-Secret") ||
-    c.req.header("Authorization")?.replace("Bearer ", "");
-  const expected = c.env.FRONTEND_API_SECRET || "lsh_secret_live_prod_2026";
-  const qUserId = c.req.query("userId") || c.req.header("X-User-Id");
-
-  if (
-    secret &&
-    (secret === expected ||
-      secret === "lsh_secret_live_prod_2026" ||
-      secret === "test_secret" ||
-      secret.startsWith("lsh_"))
-  ) {
-    if (qUserId) {
-      c.set("auth", { userId: qUserId, plan: "PRO", keyId: "internal" });
-      return next();
-    }
-  }
-  return authMiddleware(c, next);
-});
+// Strict authentication (Dashboard secret OR valid hashed Bearer API key)
+analytics.use("*", authMiddleware);
 
 function calculatePeriodCutoff(period: string): string {
   const now = new Date();
@@ -104,11 +84,11 @@ async function getAnalyticsData(
 
   const cutoffDate = calculatePeriodCutoff(safePeriod);
 
-  // 1. Strictly indexed queries on click_events, links, and conversions
+  // 1. Strictly indexed & user-scoped queries on click_events, links, and conversions
   const whereClause = linkId
-    ? `link_id = ? AND timestamp >= ?`
+    ? `user_id = ? AND link_id = ? AND timestamp >= ?`
     : `user_id = ? AND timestamp >= ?`;
-  const whereBinds = linkId ? [linkId, cutoffDate] : [userId, cutoffDate];
+  const whereBinds = linkId ? [userId, linkId, cutoffDate] : [userId, cutoffDate];
 
   const convWhere = linkId
     ? `user_id = ? AND link_id = ?`

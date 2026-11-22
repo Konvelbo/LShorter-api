@@ -4,9 +4,9 @@
 
 import { Hono } from "hono";
 import { type CloudflareBindings, type AuthContext, type Plan, PLAN_LIMITS, computePlanOverage } from "../lib/types";
-import { authMiddleware } from "../middleware/auth";
+import { authMiddleware, isFrontendMasterRequest, isFrontendAuth } from "../middleware/auth";
 import { rateLimit } from "../middleware/ratelimit";
-import { CreateUserSchema, CreateApiKeySchema } from "../lib/schemas";
+import { CreateUserSchema, CreateApiKeySchema, optionalSafeUrl } from "../lib/schemas";
 import { uid, generateApiKey, sha256, ok, err, now } from "../lib/utils";
 import { z } from "zod";
 
@@ -18,20 +18,13 @@ const SyncUserSchema = z.object({
   email: z.string().email(),
   name: z.string().max(120).optional().nullable(),
   plan: z.enum(["FREEMIUM", "PRO", "BUSINESS", "STARTER", "ENTERPRISE"]).default("FREEMIUM"),
-  avatarUrl: z.string().url().optional().nullable(),
+  avatarUrl: optionalSafeUrl,
   provider: z.string().optional().nullable(),
 });
 
 const handleUserSync = async (c: any) => {
   // Seul le frontend peut synchroniser/créer un compte
-  const frontendSecret = c.req.header("X-Frontend-Secret");
-  const authHeader = c.req.header("Authorization");
-  const expected = c.env.FRONTEND_API_SECRET || "lsh_secret_live_prod_2026";
-  const isAuthorized =
-    (frontendSecret && (frontendSecret === expected || frontendSecret === "lsh_secret_live_prod_2026" || frontendSecret === "test_secret" || frontendSecret === "test_frontend_secret")) ||
-    (authHeader && (authHeader === `Bearer ${expected}` || authHeader === "Bearer lsh_secret_live_prod_2026" || authHeader === "Bearer test_secret"));
-
-  if (!isAuthorized) {
+  if (!isFrontendMasterRequest(c)) {
     return err("Forbidden: Only frontend can sync/create accounts", 403, "FORBIDDEN");
   }
 
@@ -186,8 +179,8 @@ const UpdateUserSchema = z.object({
   plan: z.enum(["FREEMIUM", "PRO", "BUSINESS", "STARTER", "ENTERPRISE"]).optional(),
   name: z.string().min(1).max(120).optional(),
   fullName: z.string().min(1).max(120).optional(),
-  avatarUrl: z.string().url().optional().nullable(),
-  avatar_url: z.string().url().optional().nullable(),
+  avatarUrl: optionalSafeUrl,
+  avatar_url: optionalSafeUrl,
   language: z.string().max(10).optional(),
   timezone: z.string().max(50).optional(),
 });
@@ -273,15 +266,7 @@ users.patch("/me", authMiddleware, async (c) => {
 // ─── PATCH /api/v1/users/:userId  (update plan/name by ID - Dashboard Only) ───
 users.patch("/:userId", authMiddleware, async (c) => {
   const targetUserId = c.req.param("userId");
-  const { keyId } = c.get("auth");
-  const frontendSecret = c.req.header("X-Frontend-Secret");
-  const authHeader = c.req.header("Authorization");
-  const expected = c.env.FRONTEND_API_SECRET || 'lsh_secret_live_prod_2026';
-
-  const isFrontend =
-    keyId === "frontend_master" ||
-    (frontendSecret && (frontendSecret === expected || frontendSecret === 'lsh_secret_live_prod_2026' || frontendSecret === 'test_secret')) ||
-    (authHeader && (authHeader === `Bearer ${expected}` || authHeader === 'Bearer lsh_secret_live_prod_2026' || authHeader === 'Bearer test_secret'));
+  const isFrontend = isFrontendAuth(c.get("auth"));
 
   if (!isFrontend) {
     return err("Forbidden: Profile modifications via public API keys are disabled for security.", 403, "FORBIDDEN");
@@ -360,15 +345,8 @@ users.patch("/:userId", authMiddleware, async (c) => {
 // ─── POST /api/v1/users/:userId/upgrade ───────────────────────────────────────
 users.post("/:userId/upgrade", authMiddleware, async (c) => {
   const targetUserId = c.req.param("userId");
-  const frontendSecret = c.req.header("X-Frontend-Secret");
-  const authHeader = c.req.header("Authorization");
-  const expected = c.env.FRONTEND_API_SECRET || "lsh_secret_live_prod_2026";
 
-  const isFrontend =
-    (frontendSecret && (frontendSecret === expected || frontendSecret === "lsh_secret_live_prod_2026" || frontendSecret === "test_secret")) ||
-    (authHeader && (authHeader === `Bearer ${expected}` || authHeader === "Bearer lsh_secret_live_prod_2026" || authHeader === "Bearer test_secret"));
-
-  if (!isFrontend) {
+  if (!isFrontendAuth(c.get("auth"))) {
     return err("Forbidden: Only frontend can upgrade plans", 403, "FORBIDDEN");
   }
 
@@ -394,14 +372,7 @@ users.post(
   "/:userId/keys",
   rateLimit({ limit: 15, windowSeconds: 60, keyType: "ip" }),
   async (c, next) => {
-    const frontendSecret = c.req.header("X-Frontend-Secret");
-    const expected = c.env.FRONTEND_API_SECRET || "lsh_secret_live_prod_2026";
-    if (
-      frontendSecret &&
-      (frontendSecret === expected ||
-        frontendSecret === "lsh_secret_live_prod_2026" ||
-        frontendSecret === "test_secret")
-    ) {
+    if (isFrontendMasterRequest(c)) {
       return next();
     }
     return err("Forbidden: Only the Frontend Dashboard can generate API keys.", 403, "FORBIDDEN");
@@ -511,14 +482,7 @@ users.post(
 
 // ─── GET /api/v1/users/:userId/keys  ─────────────────────────────────────────
 users.get("/:userId/keys", async (c) => {
-  const frontendSecret = c.req.header("X-Frontend-Secret");
-  const expected = c.env.FRONTEND_API_SECRET || "lsh_secret_live_prod_2026";
-  if (
-    !frontendSecret ||
-    (frontendSecret !== expected &&
-      frontendSecret !== "lsh_secret_live_prod_2026" &&
-      frontendSecret !== "test_secret")
-  ) {
+  if (!isFrontendMasterRequest(c)) {
     return err("Forbidden: Only the Frontend Dashboard can list API keys.", 403, "FORBIDDEN");
   }
 
@@ -555,14 +519,7 @@ users.get("/:userId/keys", async (c) => {
 
 // ─── DELETE /api/v1/users/:userId/keys/:keyId ─────────────────────────────────
 users.delete("/:userId/keys/:keyId", async (c) => {
-  const frontendSecret = c.req.header("X-Frontend-Secret");
-  const expected = c.env.FRONTEND_API_SECRET || "lsh_secret_live_prod_2026";
-  if (
-    !frontendSecret ||
-    (frontendSecret !== expected &&
-      frontendSecret !== "lsh_secret_live_prod_2026" &&
-      frontendSecret !== "test_secret")
-  ) {
+  if (!isFrontendMasterRequest(c)) {
     return err("Forbidden: Only the Frontend Dashboard can delete API keys.", 403, "FORBIDDEN");
   }
 

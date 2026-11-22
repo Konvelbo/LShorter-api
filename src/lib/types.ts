@@ -138,6 +138,8 @@ export interface CachedLink {
   twitterCard?: string | null;
   twitter_card?: string | null;
   routingRules: any[] | null;
+  pixels?: unknown;
+  pixel_ids?: unknown;
   expiresAt: string | null;
 }
 

@@ -2,7 +2,7 @@
 // AUTHENTICATION MIDDLEWARE  (Strict API Key Validation)
 // =================================================================
 
-import { type MiddlewareHandler } from 'hono';
+import { type Context, type MiddlewareHandler } from 'hono';
 import { type CloudflareBindings, type AuthContext, type Plan, PLAN_LIMITS } from '../lib/types';
 import { err, sha256, now } from '../lib/utils';
 
@@ -13,24 +13,47 @@ const userAuthCache = new Map<
 >();
 const AUTH_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 
+function timingSafeEqualStr(a: string, b: string): boolean {
+  if (!a || !b || a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) {
+    diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  }
+  return diff === 0;
+}
+
+/**
+ * Strictly validates that an incoming request carries the exact configured
+ * FRONTEND_API_SECRET (never accepts test strings or prefix heuristics).
+ */
+export function isFrontendMasterRequest(c: Context<any, any, any>): boolean {
+  const expectedSecret = (c.env as CloudflareBindings)?.FRONTEND_API_SECRET || 'lsh_secret_live_prod_2026';
+  const frontendSecret = (c.req.header('X-Frontend-Secret') || '').trim();
+  const authHeader = c.req.header('Authorization') || '';
+  const bearer = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : '';
+
+  return (
+    (Boolean(frontendSecret) && timingSafeEqualStr(frontendSecret, expectedSecret)) ||
+    (Boolean(bearer) && timingSafeEqualStr(bearer, expectedSecret))
+  );
+}
+
+/**
+ * Returns true ONLY when the authenticated context came from the trusted
+ * LShorter Frontend Dashboard (never for public API keys).
+ */
+export function isFrontendAuth(auth: AuthContext | undefined): boolean {
+  return auth?.keyId === 'frontend_master';
+}
+
 export const authMiddleware: MiddlewareHandler<{
   Bindings: CloudflareBindings;
   Variables: { auth: AuthContext };
 }> = async (c, next) => {
   const authHeader = c.req.header('Authorization');
-  const frontendSecret = c.req.header('X-Frontend-Secret');
-  const expectedSecret = c.env.FRONTEND_API_SECRET || 'lsh_secret_live_prod_2026';
 
-  // validSecrets: env-configured secret is always valid.
-  // 'test_secret' is kept for local wrangler dev / vitest environments only;
-  // in production FRONTEND_API_SECRET is set and 'test_secret' won't match it.
-  const validSecrets = new Set([expectedSecret, 'test_secret']);
-
-  // 1. Direct Frontend Proxy Authentication
-  if (
-    (frontendSecret && validSecrets.has(frontendSecret)) ||
-    (authHeader && authHeader.startsWith('Bearer ') && validSecrets.has(authHeader.substring(7).trim()))
-  ) {
+  // 1. Direct Frontend Proxy Authentication (strict constant-time match)
+  if (isFrontendMasterRequest(c)) {
     const targetUserId =
       c.req.query('userId') ||
       c.req.header('X-User-Id');

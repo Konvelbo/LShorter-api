@@ -4,6 +4,7 @@
 
 import { type MiddlewareHandler } from 'hono';
 import { type CloudflareBindings, type AuthContext, PLAN_LIMITS, computePlanOverage } from '../lib/types';
+import { isFrontendMasterRequest } from './auth';
 import { err, monthBucket } from '../lib/utils';
 
 interface RateLimitOptions {
@@ -46,14 +47,7 @@ function purgeStaleRateLimits(now: number) {
 export function rateLimit(opts: RateLimitOptions): MiddlewareHandler<{ Bindings: CloudflareBindings }> {
   return async (c, next) => {
     // Trusted Frontend backend requests are exempt from public IP rate limiting
-    const frontendSecret = c.req.header('X-Frontend-Secret') || c.req.header('Authorization')?.replace('Bearer ', '');
-    const expected = c.env.FRONTEND_API_SECRET || 'lsh_secret_live_prod_2026';
-    if (
-      frontendSecret &&
-      (frontendSecret === expected ||
-        frontendSecret === 'lsh_secret_live_prod_2026' ||
-        frontendSecret === 'test_secret')
-    ) {
+    if (isFrontendMasterRequest(c)) {
       return next();
     }
 

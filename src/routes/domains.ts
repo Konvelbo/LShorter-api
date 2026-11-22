@@ -118,6 +118,7 @@ domains.post(
       success: true,
       data: {
         id:          domainId,
+        domain:      domain,
         domain_name: domain,
         status:      'pending',
         dnsRecords,

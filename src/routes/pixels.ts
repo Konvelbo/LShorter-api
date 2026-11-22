@@ -4,7 +4,7 @@
 
 import { Hono } from "hono";
 import { type CloudflareBindings, type AuthContext } from "../lib/types";
-import { authMiddleware } from "../middleware/auth";
+import { authMiddleware, isFrontendAuth } from "../middleware/auth";
 import { CreatePixelSchema, UpdatePixelSchema } from "../lib/schemas";
 import { uid, ok, err, now } from "../lib/utils";
 
@@ -13,33 +13,27 @@ const pixels = new Hono<{
   Variables: { auth: AuthContext };
 }>();
 
-// Allow Frontend secret or Bearer Auth
-pixels.use("*", async (c, next) => {
-  const secret =
-    c.req.header("X-Frontend-Secret") ||
-    c.req.header("Authorization")?.replace("Bearer ", "");
-  const expected = c.env.FRONTEND_API_SECRET;
-  const qUserId = c.req.query("userId") || c.req.header("X-User-Id");
+// Strict authentication (Dashboard secret OR valid hashed Bearer API key)
+pixels.use("*", authMiddleware);
 
-  if (
-    secret &&
-    (secret === expected ||
-      secret === "test_secret" ||
-      secret.startsWith("lsh_"))
-  ) {
-    if (qUserId) {
-      c.set("auth", { userId: qUserId, plan: "PRO", keyId: "internal", role: "admin" } as any);
-      return next();
-    }
-  }
-  return authMiddleware(c, next);
-});
+function formatPixelRow(p: any) {
+  return {
+    id: p.id,
+    userId: p.user_id,
+    platform: p.platform,
+    pixelId: p.pixel_id,
+    name: p.name,
+    isActive: Boolean(p.is_active),
+    eventsTrackedCount: Number(p.events_tracked_count || 0),
+    createdAt: p.created_at,
+  };
+}
 
 // ─── GET /api/v1/pixels (List all retargeting pixels for user) ───────────────
 pixels.get("/", async (c) => {
   const auth = c.get("auth");
   const qUserId = c.req.query("userId") || c.req.header("X-User-Id");
-  const userId = qUserId && (auth.role === "admin" || qUserId === auth.userId) ? qUserId : auth.userId;
+  const userId = isFrontendAuth(auth) && qUserId ? qUserId : auth.userId;
 
   const rows = await c.env.DB.prepare(
     `SELECT id, user_id, platform, pixel_id, name, is_active, events_tracked_count, created_at
@@ -50,25 +44,38 @@ pixels.get("/", async (c) => {
     .bind(userId)
     .all();
 
-  const data = (rows.results || []).map((p: any) => ({
-    id: p.id,
-    userId: p.user_id,
-    platform: p.platform,
-    pixelId: p.pixel_id,
-    name: p.name,
-    isActive: Boolean(p.is_active),
-    eventsTrackedCount: Number(p.events_tracked_count || 0),
-    createdAt: p.created_at,
-  }));
-
+  const data = (rows.results || []).map(formatPixelRow);
   return ok({ pixels: data });
 });
 
-// ─── POST /api/v1/pixels (Register a new pixel) ──────────────────────────────
+// ─── GET /api/v1/pixels/:id (Get single pixel) ───────────────────────────────
+pixels.get("/:id", async (c) => {
+  const auth = c.get("auth");
+  const id = c.req.param("id");
+
+  const row = await c.env.DB.prepare(
+    `SELECT id, user_id, platform, pixel_id, name, is_active, events_tracked_count, created_at
+     FROM retargeting_pixels
+     WHERE id = ?`,
+  )
+    .bind(id)
+    .first<any>();
+
+  if (!row) {
+    return err("Pixel not found", 404, "NOT_FOUND");
+  }
+
+  if (!isFrontendAuth(auth) && row.user_id !== auth.userId) {
+    return err("Forbidden", 403, "FORBIDDEN");
+  }
+
+  return ok({ pixel: formatPixelRow(row) });
+});
+
+// ─── POST /api/v1/pixels (Register a new pixel — Dashboard ONLY) ─────────────
 pixels.post("/", async (c) => {
   const auth = c.get("auth");
-  const isInternal = auth?.keyId === "internal" || Boolean(c.req.header("X-Frontend-Secret"));
-  if (!isInternal) {
+  if (!isFrontendAuth(auth)) {
     return err(
       "La création de pixels de retargeting via le SDK ou la clé API est désactivée. Veuillez enregistrer vos pixels depuis le tableau de bord LShorter.",
       403,
@@ -84,7 +91,16 @@ pixels.post("/", async (c) => {
     return err("Invalid JSON body", 400);
   }
 
-  const parsed = CreatePixelSchema.safeParse(body);
+  const normalizedBody = {
+    ...body,
+    platform: typeof body?.platform === "string"
+      ? body.platform.trim().toLowerCase()
+      : typeof body?.type === "string"
+        ? body.type.trim().toLowerCase()
+        : body?.platform,
+  };
+
+  const parsed = CreatePixelSchema.safeParse(normalizedBody);
   if (!parsed.success) {
     return err(
       parsed.error.issues.map((i) => i.message).join(", "),
@@ -93,7 +109,7 @@ pixels.post("/", async (c) => {
     );
   }
 
-  const userId = body.userId || (qUserId && auth.role === "admin" ? qUserId : auth.userId);
+  const userId = body.userId || qUserId || auth.userId;
   const { platform, pixelId, name, isActive } = parsed.data;
   const id = uid("px");
   const createdAt = now();
@@ -149,7 +165,7 @@ pixels.patch("/:id", async (c) => {
     return err("Pixel not found", 404, "NOT_FOUND");
   }
 
-  if (auth.role !== "admin" && existing.user_id !== auth.userId) {
+  if (!isFrontendAuth(auth) && existing.user_id !== auth.userId) {
     return err("Forbidden", 403, "FORBIDDEN");
   }
 
@@ -185,18 +201,7 @@ pixels.patch("/:id", async (c) => {
     .bind(id)
     .first<any>();
 
-  return ok({
-    pixel: {
-      id: updated.id,
-      userId: updated.user_id,
-      platform: updated.platform,
-      pixelId: updated.pixel_id,
-      name: updated.name,
-      isActive: Boolean(updated.is_active),
-      eventsTrackedCount: Number(updated.events_tracked_count || 0),
-      createdAt: updated.created_at,
-    },
-  });
+  return ok({ pixel: formatPixelRow(updated) });
 });
 
 // ─── DELETE /api/v1/pixels/:id (Remove pixel) ────────────────────────────────
@@ -214,7 +219,7 @@ pixels.delete("/:id", async (c) => {
     return err("Pixel not found", 404, "NOT_FOUND");
   }
 
-  if (auth.role !== "admin" && existing.user_id !== auth.userId) {
+  if (!isFrontendAuth(auth) && existing.user_id !== auth.userId) {
     return err("Forbidden", 403, "FORBIDDEN");
   }
 
@@ -222,7 +227,7 @@ pixels.delete("/:id", async (c) => {
     .bind(id)
     .run();
 
-  return ok({ success: true, deletedId: id });
+  return ok({ success: true, deleted: true, deletedId: id });
 });
 
 export default pixels;

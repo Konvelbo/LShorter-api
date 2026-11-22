@@ -4,7 +4,7 @@
 
 import { Hono } from "hono";
 import { type CloudflareBindings, type AuthContext } from "../lib/types";
-import { authMiddleware } from "../middleware/auth";
+import { authMiddleware, isFrontendAuth } from "../middleware/auth";
 import { CreateWebhookSchema, UpdateWebhookSchema } from "../lib/schemas";
 import { uid, ok, err, now } from "../lib/utils";
 
@@ -13,33 +13,38 @@ const webhooks = new Hono<{
   Variables: { auth: AuthContext };
 }>();
 
-// Allow Frontend secret or Bearer Auth
-webhooks.use("*", async (c, next) => {
-  const secret =
-    c.req.header("X-Frontend-Secret") ||
-    c.req.header("Authorization")?.replace("Bearer ", "");
-  const expected = c.env.FRONTEND_API_SECRET;
-  const qUserId = c.req.query("userId") || c.req.header("X-User-Id");
+// Strict authentication (Dashboard secret OR valid hashed Bearer API key)
+webhooks.use("*", authMiddleware);
 
-  if (
-    secret &&
-    (secret === expected ||
-      secret === "test_secret" ||
-      secret.startsWith("lsh_"))
-  ) {
-    if (qUserId) {
-      c.set("auth", { userId: qUserId, plan: "PRO", keyId: "internal", role: "admin" } as any);
-      return next();
+function formatWebhookRow(w: any) {
+  let parsedEvents: string[] = ["click.created", "conversion.created"];
+  try {
+    if (typeof w.events === "string") {
+      parsedEvents = JSON.parse(w.events);
+    } else if (Array.isArray(w.events)) {
+      parsedEvents = w.events;
     }
-  }
-  return authMiddleware(c, next);
-});
+  } catch {}
+
+  return {
+    id: w.id,
+    userId: w.user_id,
+    url: w.url,
+    events: parsedEvents,
+    secretKey: w.secret_key,
+    isActive: Boolean(w.is_active),
+    lastTriggeredAt: w.last_triggered_at,
+    lastStatus: w.last_status,
+    createdAt: w.created_at,
+    created_at: w.created_at,
+  };
+}
 
 // ─── GET /api/v1/webhooks (List all webhooks for user) ───────────────────────
 webhooks.get("/", async (c) => {
   const auth = c.get("auth");
   const qUserId = c.req.query("userId") || c.req.header("X-User-Id");
-  const userId = qUserId && (auth.role === "admin" || qUserId === auth.userId) ? qUserId : auth.userId;
+  const userId = isFrontendAuth(auth) && qUserId ? qUserId : auth.userId;
 
   const rows = await c.env.DB.prepare(
     `SELECT id, user_id, url, events, secret_key, is_active, last_triggered_at, last_status, created_at
@@ -50,38 +55,38 @@ webhooks.get("/", async (c) => {
     .bind(userId)
     .all();
 
-  const data = (rows.results || []).map((w: any) => {
-    let parsedEvents: string[] = ["click.created", "conversion.created"];
-    try {
-      if (typeof w.events === "string") {
-        parsedEvents = JSON.parse(w.events);
-      } else if (Array.isArray(w.events)) {
-        parsedEvents = w.events;
-      }
-    } catch {}
-
-    return {
-      id: w.id,
-      userId: w.user_id,
-      url: w.url,
-      events: parsedEvents,
-      secretKey: w.secret_key,
-      isActive: Boolean(w.is_active),
-      lastTriggeredAt: w.last_triggered_at,
-      lastStatus: w.last_status,
-      createdAt: w.created_at,
-      created_at: w.created_at,
-    };
-  });
-
+  const data = (rows.results || []).map(formatWebhookRow);
   return ok({ webhooks: data });
 });
 
-// ─── POST /api/v1/webhooks (Create a new webhook) ────────────────────────────
+// ─── GET /api/v1/webhooks/:id (Get single webhook) ───────────────────────────
+webhooks.get("/:id", async (c) => {
+  const auth = c.get("auth");
+  const id = c.req.param("id");
+
+  const row = await c.env.DB.prepare(
+    `SELECT id, user_id, url, events, secret_key, is_active, last_triggered_at, last_status, created_at
+     FROM webhooks
+     WHERE id = ?`,
+  )
+    .bind(id)
+    .first<any>();
+
+  if (!row) {
+    return err("Webhook not found", 404, "NOT_FOUND");
+  }
+
+  if (!isFrontendAuth(auth) && row.user_id !== auth.userId) {
+    return err("Forbidden", 403, "FORBIDDEN");
+  }
+
+  return ok({ webhook: formatWebhookRow(row) });
+});
+
+// ─── POST /api/v1/webhooks (Create a new webhook — Dashboard ONLY) ───────────
 webhooks.post("/", async (c) => {
   const auth = c.get("auth");
-  const isInternal = auth?.keyId === "internal" || Boolean(c.req.header("X-Frontend-Secret"));
-  if (!isInternal) {
+  if (!isFrontendAuth(auth)) {
     return err(
       "La création de webhooks via le SDK ou la clé API est désactivée. Veuillez configurer vos webhooks depuis le tableau de bord LShorter.",
       403,
@@ -106,7 +111,7 @@ webhooks.post("/", async (c) => {
     );
   }
 
-  const userId = body.userId || (qUserId && auth.role === "admin" ? qUserId : auth.userId);
+  const userId = body.userId || qUserId || auth.userId;
   const { url, events, secretKey, isActive } = parsed.data;
   const id = uid("wh");
   const finalSecret = secretKey?.trim() || uid("whsec", 16);
@@ -147,6 +152,7 @@ webhooks.post("/", async (c) => {
 // ─── PATCH /api/v1/webhooks/:id (Update webhook) ─────────────────────────────
 webhooks.patch("/:id", async (c) => {
   const auth = c.get("auth");
+  const isFrontend = isFrontendAuth(auth);
   const id = c.req.param("id");
   let body: any = {};
   try {
@@ -174,7 +180,7 @@ webhooks.patch("/:id", async (c) => {
     return err("Webhook not found", 404, "NOT_FOUND");
   }
 
-  if (auth.role !== "admin" && existing.user_id !== auth.userId) {
+  if (!isFrontend && existing.user_id !== auth.userId) {
     return err("Forbidden", 403, "FORBIDDEN");
   }
 
@@ -197,11 +203,11 @@ webhooks.patch("/:id", async (c) => {
     setParts.push("is_active = ?");
     bindings.push(parsed.data.isActive ? 1 : 0);
   }
-  if (parsed.data.lastStatus !== undefined) {
+  if (isFrontend && parsed.data.lastStatus !== undefined) {
     setParts.push("last_status = ?");
     bindings.push(parsed.data.lastStatus);
   }
-  if (parsed.data.lastTriggeredAt !== undefined) {
+  if (isFrontend && parsed.data.lastTriggeredAt !== undefined) {
     setParts.push("last_triggered_at = ?");
     bindings.push(parsed.data.lastTriggeredAt);
   }
@@ -222,29 +228,7 @@ webhooks.patch("/:id", async (c) => {
     .bind(id)
     .first<any>();
 
-  let parsedEvents: string[] = ["click.created", "conversion.created"];
-  try {
-    if (typeof updated.events === "string") {
-      parsedEvents = JSON.parse(updated.events);
-    } else if (Array.isArray(updated.events)) {
-      parsedEvents = updated.events;
-    }
-  } catch {}
-
-  return ok({
-    webhook: {
-      id: updated.id,
-      userId: updated.user_id,
-      url: updated.url,
-      events: parsedEvents,
-      secretKey: updated.secret_key,
-      isActive: Boolean(updated.is_active),
-      lastTriggeredAt: updated.last_triggered_at,
-      lastStatus: updated.last_status,
-      createdAt: updated.created_at,
-      created_at: updated.created_at,
-    },
-  });
+  return ok({ webhook: formatWebhookRow(updated) });
 });
 
 // ─── DELETE /api/v1/webhooks/:id (Remove webhook) ────────────────────────────
@@ -262,7 +246,7 @@ webhooks.delete("/:id", async (c) => {
     return err("Webhook not found", 404, "NOT_FOUND");
   }
 
-  if (auth.role !== "admin" && existing.user_id !== auth.userId) {
+  if (!isFrontendAuth(auth) && existing.user_id !== auth.userId) {
     return err("Forbidden", 403, "FORBIDDEN");
   }
 
@@ -270,7 +254,7 @@ webhooks.delete("/:id", async (c) => {
     .bind(id)
     .run();
 
-  return ok({ success: true, deletedId: id });
+  return ok({ success: true, deleted: true, deletedId: id });
 });
 
 export default webhooks;

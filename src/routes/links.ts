@@ -8,11 +8,32 @@ import {
   type AuthContext,
   PLAN_LIMITS,
 } from "../lib/types";
-import { authMiddleware } from "../middleware/auth";
+import { authMiddleware, isFrontendAuth } from "../middleware/auth";
 import { rateLimit } from "../middleware/ratelimit";
 import { CreateLinkSchema, UpdateLinkSchema } from "../lib/schemas";
 import { uid, randomSlug, isSafeUrl, ok, err, now, sha256, getCountryName } from "../lib/utils";
 import { parseDevice } from "../lib/device";
+
+function sanitizePixelIds(raw: unknown): string[] | null {
+  if (!Array.isArray(raw)) return null;
+  const ids: string[] = [];
+  const seen = new Set<string>();
+  for (const item of raw) {
+    let id = "";
+    if (typeof item === "string") {
+      id = item.trim();
+    } else if (item && typeof item === "object") {
+      const obj = item as Record<string, unknown>;
+      id = String(obj.id || obj.pixelId || obj.pixel_id || "").trim();
+    }
+    if (id && id.length <= 100 && !seen.has(id)) {
+      seen.add(id);
+      ids.push(id);
+      if (ids.length >= 25) break;
+    }
+  }
+  return ids;
+}
 
 const links = new Hono<{
   Bindings: CloudflareBindings;
@@ -325,13 +346,12 @@ links.post(
     const requestedPlanInBody = (body as any)?.userPlan || (body as any)?.plan;
     const headerEmail = c.req.header('X-User-Email')?.toLowerCase();
     const headerPlan = c.req.header('X-User-Plan')?.toUpperCase();
-    const isFrontendCaller = c.get("auth")?.keyId === "frontend_master";
+    const isFrontendCaller = isFrontendAuth(c.get("auth"));
     let plan = callerPlan;
     if (
-      headerEmail === 'fiatechnologiecam@gmail.com' ||
       userId === 'usr_1790454166066_fwlb48z' ||
       userId === '7254d43d-caf7-487d-bd22-1666795253a2' ||
-      headerPlan === 'ENTERPRISE'
+      (isFrontendCaller && (headerEmail === 'fiatechnologiecam@gmail.com' || headerPlan === 'ENTERPRISE'))
     ) {
       plan = 'ENTERPRISE' as any;
     } else if (isFrontendCaller && requestedPlanInBody) {
@@ -636,7 +656,7 @@ links.post(
     const finalIsActive = isNewLinkExpired ? 0 : (isActive !== false ? 1 : 0);
 
     const rawPixels = (parsed.data as any).pixels ?? (parsed.data as any).pixel_ids ?? (parsed.data as any).pixelIds;
-    const cleanPixels = Array.isArray(rawPixels) ? rawPixels.map(String) : null;
+    const cleanPixels = sanitizePixelIds(rawPixels);
 
     let inserted = false;
     while (!inserted && attempts < maxAttempts) {
@@ -793,7 +813,8 @@ links.post(
           isActive: isActive ?? true,
           expiresAt: expiresAt ?? null,
           hasPassword: !!password,
-          password: finalPasswordPlain,
+          has_password: !!password,
+          password: isFrontendCaller ? finalPasswordPlain : undefined,
           maxClicks: finalMaxClicks,
           max_clicks: finalMaxClicks,
           fallbackUrl: finalFallbackUrl,
@@ -804,8 +825,10 @@ links.post(
           path_lock_prefix: finalPathLockPrefix,
           pathLockMessage: finalPathLockMessage,
           path_lock_message: finalPathLockMessage,
-          pathLockPassword: finalPathLockPassword,
-          path_lock_password: finalPathLockPassword,
+          hasPathLockPassword: Boolean(finalPathLockPassword),
+          has_path_lock_password: Boolean(finalPathLockPassword),
+          pathLockPassword: isFrontendCaller ? finalPathLockPassword : undefined,
+          path_lock_password: isFrontendCaller ? finalPathLockPassword : undefined,
           tags: tags ?? null,
           pixels: cleanPixels || [],
           pixel_ids: cleanPixels || [],
@@ -849,19 +872,9 @@ links.patch("/:id", async (c) => {
     }>();
 
   if (!existing) return err("Link not found", 404, "NOT_FOUND");
-  const frontendSecret = c.req.header("X-Frontend-Secret") || "";
-  const expectedSecret =
-    c.env.FRONTEND_API_SECRET || "lsh_secret_live_prod_2026";
-  const isFrontendValid =
-    frontendSecret === expectedSecret ||
-    frontendSecret === "lsh_secret_live_prod_2026" ||
-    frontendSecret === "test_secret";
+  const isFrontendValid = isFrontendAuth(c.get("auth"));
 
-  if (
-    existing.user_id !== userId &&
-    userId !== "usr_default" &&
-    !isFrontendValid
-  ) {
+  if (!isFrontendValid && existing.user_id !== userId) {
     return err("Forbidden", 403, "FORBIDDEN");
   }
 
@@ -877,10 +890,9 @@ links.patch("/:id", async (c) => {
   const headerPlan = c.req.header('X-User-Plan')?.toUpperCase();
   let plan = callerPlan;
   if (
-    headerEmail === 'fiatechnologiecam@gmail.com' ||
     userId === 'usr_1790454166066_fwlb48z' ||
     userId === '7254d43d-caf7-487d-bd22-1666795253a2' ||
-    headerPlan === 'ENTERPRISE'
+    (isFrontendValid && (headerEmail === 'fiatechnologiecam@gmail.com' || headerPlan === 'ENTERPRISE'))
   ) {
     plan = 'ENTERPRISE' as any;
   } else if (isFrontendValid && requestedPlanInBody) {
@@ -937,7 +949,7 @@ links.patch("/:id", async (c) => {
       updates.isCloaked ||
       updates.hideReferrer ||
       updates.expiresAt ||
-      (updates.maxClicks !== undefined && updates.maxClicks !== null && updates.maxClicks !== "" && Number(updates.maxClicks) > 0) ||
+      (updates.maxClicks !== undefined && updates.maxClicks !== null && Number(updates.maxClicks) > 0) ||
       updates.fallbackUrl
     );
     if (hasProtectionOrExpiry) {
@@ -1231,7 +1243,7 @@ links.patch("/:id", async (c) => {
     ? (updates as any).pixel_ids
     : (updates as any).pixelIds;
   if (rawPatchPixels !== undefined) {
-    const cleanPixels = Array.isArray(rawPatchPixels) ? rawPatchPixels.map(String) : null;
+    const cleanPixels = sanitizePixelIds(rawPatchPixels);
     setParts.push("pixels = ?");
     bindings.push(cleanPixels ? JSON.stringify(cleanPixels) : null);
   }
@@ -1387,8 +1399,15 @@ links.patch("/:id", async (c) => {
       updated?.pass_params !== undefined ? Boolean(updated.pass_params) : true,
     pass_params:
       updated?.pass_params !== undefined ? Boolean(updated.pass_params) : true,
-    pathLockPassword: updated?.path_lock_password || null,
-    path_lock_password: updated?.path_lock_password || null,
+    hasPassword: Boolean(updated?.password_hash || updated?.password_plain),
+    has_password: Boolean(updated?.password_hash || updated?.password_plain),
+    password: isFrontendValid ? (updated?.password_plain || null) : undefined,
+    password_plain: isFrontendValid ? (updated?.password_plain || null) : undefined,
+    password_hash: undefined,
+    hasPathLockPassword: Boolean(updated?.path_lock_password),
+    has_path_lock_password: Boolean(updated?.path_lock_password),
+    pathLockPassword: isFrontendValid ? (updated?.path_lock_password || null) : undefined,
+    path_lock_password: isFrontendValid ? (updated?.path_lock_password || null) : undefined,
     pixels: parsedUpdatedPixels,
     pixel_ids: parsedUpdatedPixels,
     bannerStyle: resolvedUpdatedBanner.bannerStyle,
@@ -1402,7 +1421,9 @@ links.patch("/:id", async (c) => {
 
 // ─── GET /api/v1/links  (list, with optional tag filter) ──────────────────────
 links.get("/", async (c) => {
-  const { userId } = c.get("auth");
+  const auth = c.get("auth");
+  const { userId } = auth;
+  const isFrontend = isFrontendAuth(auth);
   const page = Math.max(1, parseInt(c.req.query("page") ?? "1", 10));
   const limit = Math.min(100, parseInt(c.req.query("limit") ?? "20", 10));
   const offset = (page - 1) * limit;
@@ -1491,9 +1512,15 @@ links.get("/", async (c) => {
         is_active: effectiveIsActive,
         isActive: effectiveIsActive !== 0,
         status: isExpired ? "expired" : effectiveIsActive === 0 ? "paused" : "active",
-        password: row.password_plain || null,
-        pathLockPassword: (row as any).path_lock_password || null,
-        path_lock_password: (row as any).path_lock_password || null,
+        hasPassword: Boolean(row.has_password || row.password_plain),
+        has_password: Boolean(row.has_password || row.password_plain),
+        password: isFrontend ? (row.password_plain || null) : undefined,
+        password_plain: isFrontend ? (row.password_plain || null) : undefined,
+        password_hash: undefined,
+        hasPathLockPassword: Boolean((row as any).path_lock_password),
+        has_path_lock_password: Boolean((row as any).path_lock_password),
+        pathLockPassword: isFrontend ? ((row as any).path_lock_password || null) : undefined,
+        path_lock_password: isFrontend ? ((row as any).path_lock_password || null) : undefined,
         maxClicks:
           row.max_clicks !== null && row.max_clicks !== undefined
             ? Number(row.max_clicks)
@@ -1561,31 +1588,32 @@ links.get("/", async (c) => {
 
 // ─── GET /api/v1/links/:id (get by ID or slug) ──────────────────────────────
 links.get("/:id", async (c) => {
-  const { userId, role } = c.get("auth");
+  const auth = c.get("auth");
+  const { userId } = auth;
+  const isFrontend = isFrontendAuth(auth);
   const idOrSlug = decodeURIComponent(c.req.param("id")).trim();
 
-  const row = await c.env.DB.prepare(
-    `SELECT * FROM links WHERE id = ? OR slug = ? OR LOWER(slug) = LOWER(?) ORDER BY created_at DESC LIMIT 1`
-  )
-    .bind(idOrSlug, idOrSlug, idOrSlug)
-    .first();
+  let row: any = null;
+  if (!isFrontend) {
+    // Prefer caller's own link first (handles custom-domain slug collisions cleanly)
+    row = await c.env.DB.prepare(
+      `SELECT * FROM links WHERE (id = ? OR slug = ? OR LOWER(slug) = LOWER(?)) AND user_id = ? ORDER BY created_at DESC LIMIT 1`
+    )
+      .bind(idOrSlug, idOrSlug, idOrSlug, userId)
+      .first();
+  }
+  if (!row) {
+    row = await c.env.DB.prepare(
+      `SELECT * FROM links WHERE id = ? OR slug = ? OR LOWER(slug) = LOWER(?) ORDER BY created_at DESC LIMIT 1`
+    )
+      .bind(idOrSlug, idOrSlug, idOrSlug)
+      .first();
+  }
 
   if (!row) return err("Link not found", 404, "NOT_FOUND");
 
   const link = row as Record<string, any>;
-  const frontendSecret = c.req.header("X-Frontend-Secret") || "";
-  const expectedSecret = c.env.FRONTEND_API_SECRET || "lsh_secret_live_prod_2026";
-  const isFrontendValid = frontendSecret === expectedSecret || frontendSecret === "lsh_secret_live_prod_2026" || frontendSecret === "test_secret";
-  const effectiveUserId = c.req.query("userId") || c.req.header("X-User-Id") || userId;
-
-  if (
-    role !== "admin" &&
-    link["user_id"] !== effectiveUserId &&
-    effectiveUserId !== "usr_default" &&
-    effectiveUserId !== "usr_frontend_master" &&
-    effectiveUserId !== "all" &&
-    !isFrontendValid
-  ) {
+  if (!isFrontend && link["user_id"] !== userId) {
     return err("Forbidden", 403, "FORBIDDEN");
   }
 
@@ -1626,15 +1654,19 @@ links.get("/:id", async (c) => {
     path_lock_prefix: link["path_lock_prefix"] || null,
     pathLockMessage: link["path_lock_message"] || null,
     path_lock_message: link["path_lock_message"] || null,
-    pathLockPassword: link["path_lock_password"] || null,
-    path_lock_password: link["path_lock_password"] || null,
+    hasPathLockPassword: Boolean(link["path_lock_password"]),
+    has_path_lock_password: Boolean(link["path_lock_password"]),
+    pathLockPassword: isFrontend ? (link["path_lock_password"] || null) : undefined,
+    path_lock_password: isFrontend ? (link["path_lock_password"] || null) : undefined,
     hideReferrer: Boolean(link["hide_referrer"]),
     hide_referrer: Boolean(link["hide_referrer"]),
     maxClicks: link["max_clicks"] !== null && link["max_clicks"] !== undefined ? Number(link["max_clicks"]) : null,
     max_clicks: link["max_clicks"] !== null && link["max_clicks"] !== undefined ? Number(link["max_clicks"]) : null,
     fallbackUrl: link["fallback_url"] || null,
     fallback_url: link["fallback_url"] || null,
-    password: link["password_plain"] || null,
+    password: isFrontend ? (link["password_plain"] || null) : undefined,
+    password_plain: isFrontend ? (link["password_plain"] || null) : undefined,
+    hasPassword: Boolean(link["password_hash"] || link["password_plain"]),
     has_password: Boolean(link["password_hash"] || link["password_plain"]),
     password_hash: undefined, // never expose the hash
     tags: parsedTags,
@@ -1679,7 +1711,10 @@ links.get("/:id", async (c) => {
 });
 
 // ─── POST /api/v1/links/:id/verify-password ──────────────────────────────────
-links.post("/:id/verify-password", async (c) => {
+links.post(
+  "/:id/verify-password",
+  rateLimit({ limit: 20, windowSeconds: 60, keyType: "ip" }),
+  async (c) => {
   const idOrSlug = c.req.param("id");
   let body: any = {};
   try {
@@ -1724,9 +1759,11 @@ links.post("/:id/verify-password", async (c) => {
 
 // ─── POST /api/v1/links/bulk-delete ───────────────────────────────────────────
 links.post("/bulk-delete", async (c) => {
-  const { userId, role } = c.get("auth");
+  const auth = c.get("auth");
+  const { userId } = auth;
+  const isFrontend = isFrontendAuth(auth);
   const queryUserId = c.req.query("userId") || c.req.header("X-User-Id");
-  const effectiveUserId = queryUserId || userId;
+  const effectiveUserId = isFrontend && queryUserId ? queryUserId : userId;
 
   const body = await c.req.json().catch(() => ({}));
   const rawIds: unknown = body?.ids;
@@ -1750,15 +1787,13 @@ links.post("/bulk-delete", async (c) => {
     const chunk = ids.slice(i, i + chunkSize);
     const placeholders = chunk.map(() => "?").join(",");
 
-    const selectSql =
-      role === "admin" || effectiveUserId === "usr_frontend_master"
-        ? `SELECT id, domain_name, slug, og_image, user_id FROM links WHERE id IN (${placeholders})`
-        : `SELECT id, domain_name, slug, og_image, user_id FROM links WHERE id IN (${placeholders}) AND user_id = ?`;
+    const selectSql = isFrontend
+      ? `SELECT id, domain_name, slug, og_image, user_id FROM links WHERE id IN (${placeholders})`
+      : `SELECT id, domain_name, slug, og_image, user_id FROM links WHERE id IN (${placeholders}) AND user_id = ?`;
 
-    const selectBindings =
-      role === "admin" || effectiveUserId === "usr_frontend_master"
-        ? chunk
-        : [...chunk, effectiveUserId];
+    const selectBindings = isFrontend
+      ? chunk
+      : [...chunk, effectiveUserId];
 
     const { results } = await c.env.DB.prepare(selectSql)
       .bind(...selectBindings)
@@ -1819,10 +1854,10 @@ links.post("/bulk-delete", async (c) => {
 
 // ─── DELETE /api/v1/links/:id ─────────────────────────────────────────────────
 links.delete("/:id", async (c) => {
-  const { userId, role } = c.get("auth");
+  const auth = c.get("auth");
+  const { userId } = auth;
+  const isFrontend = isFrontendAuth(auth);
   const id = c.req.param("id");
-  const queryUserId = c.req.query("userId") || c.req.header("X-User-Id");
-  const effectiveUserId = queryUserId || userId;
 
   const row = await c.env.DB.prepare(
     `SELECT id, domain_name, slug, og_image, user_id FROM links WHERE id = ?`,
@@ -1837,11 +1872,7 @@ links.delete("/:id", async (c) => {
     }>();
 
   if (!row) return err("Link not found", 404, "NOT_FOUND");
-  if (
-    role !== "admin" &&
-    row.user_id !== effectiveUserId &&
-    effectiveUserId !== "usr_frontend_master"
-  ) {
+  if (!isFrontend && row.user_id !== userId) {
     return err("Forbidden", 403, "FORBIDDEN");
   }
 

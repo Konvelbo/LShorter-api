@@ -19,6 +19,7 @@
   "scripts": {
     "build": "pnpm run build:sdk",
     "build:sdk": "tsup src/sdk.ts --format cjs,esm --dts --clean",
+    "test": "vitest run",
     "prepublishOnly": "pnpm run build:sdk",
     "dev": "wrangler dev",
     "deploy": "wrangler deploy --minify",
