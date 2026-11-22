@@ -1,0 +1,21 @@
+[package]
+name = "lshorter"
+version = "1.0.0"
+edition = "2021"
+license = "MIT"
+description = "Official Rust SDK for LShorter — Ultra-fast Edge URL Shortener, Dynamic Routing, PathLock™, and Conversion Tracking."
+homepage = "https://lsho.cc"
+documentation = "https://lsho.cc/docs"
+repository = "https://github.com/Konvelbo/LShorter-api"
+readme = "README.md"
+keywords = ["lshorter", "url-shortener", "short-link", "analytics", "edge"]
+categories = ["api-bindings", "web-programming::http-client"]
+
+[dependencies]
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+thiserror = "2.0"
+
+[dev-dependencies]
+tokio = { version = "1.40", features = ["macros", "rt-multi-thread", "net", "io-util"] }

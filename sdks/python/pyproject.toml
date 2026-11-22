@@ -1,0 +1,45 @@
+[build-system]
+requires = ["hatchling>=1.24.0"]
+build-backend = "hatchling.build"
+
+[project]
+name = "lshorter"
+version = "1.0.0"
+description = "Official Python SDK for LShorter — Ultra-fast Edge URL Shortener, Dynamic Routing, PathLock™, and Conversion Tracking."
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.9"
+authors = [
+  { name = "KONVELBO Samuel" }
+]
+keywords = [
+  "lshorter",
+  "url-shortener",
+  "short-link",
+  "edge-redirect",
+  "analytics",
+  "conversion-tracking",
+  "pathlock",
+]
+classifiers = [
+  "Development Status :: 5 - Production/Stable",
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.9",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Typing :: Typed",
+]
+dependencies = []
+
+[project.urls]
+Homepage = "https://lsho.cc"
+Documentation = "https://lsho.cc/docs"
+Repository = "https://github.com/Konvelbo/LShorter-api"
+Issues = "https://github.com/Konvelbo/LShorter-api/issues"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/lshorter"]

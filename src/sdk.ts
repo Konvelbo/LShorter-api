@@ -38,12 +38,28 @@ export interface AbVariation {
   weight: number;
 }
 
+export interface RoutingCondition {
+  id?:       string;
+  type:      'pays' | 'continent' | 'navigateur' | 'os' | 'appareil' | string;
+  operator?: 'est' | 'nest_pas' | string;
+  value:     string;
+}
+
+export interface RoutingRule {
+  id?:             string;
+  title?:          string;
+  destinationUrl?: string;
+  targetUrl?:      string;
+  conditions?:     RoutingCondition[];
+}
+
 export interface CreateLinkOptions {
   targetUrl:        string;
   slug?:            string;
   domainName?:      string;
   geoTargeting?:    Record<string, string>;
   deviceTargeting?: Partial<Record<DeviceKey, string>>;
+  routingRules?:    RoutingRule[];
   isActive?:        boolean;
   expiresAt?:       string;
   password?:        string;
@@ -570,7 +586,20 @@ class WebhooksModule {
 export interface PixelResponse {
   id: string;
   userId?: string;
-  platform: 'meta' | 'google' | 'tiktok' | 'linkedin' | string;
+  platform:
+    | 'meta'
+    | 'facebook'
+    | 'instagram'
+    | 'google'
+    | 'google_tag'
+    | 'youtube'
+    | 'tiktok'
+    | 'linkedin'
+    | 'pinterest'
+    | 'snapchat'
+    | 'x'
+    | 'twitter'
+    | string;
   pixelId: string;
   name: string;
   isActive: boolean;

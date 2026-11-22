@@ -1,0 +1,72 @@
+name: Publish Official SDKs
+
+on:
+  push:
+    tags:
+      - "python-v*"
+      - "rust-v*"
+      - "sdks/go/v*"
+      - "php-v*"
+
+jobs:
+  publish-python:
+    if: startsWith(github.ref, 'refs/tags/python-v')
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write
+    defaults:
+      run:
+        working-directory: sdks/python
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m unittest discover -s tests -v
+      - run: pip install build && python -m build
+      - uses: pypa/gh-action-pypi-publish@release/v1
+
+  publish-rust:
+    if: startsWith(github.ref, 'refs/tags/rust-v')
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: sdks/rust
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo test --all-targets
+      - run: cargo publish --token ${{ secrets.CARGO_REGISTRY_TOKEN }}
+
+  release-go:
+    if: startsWith(github.ref, 'refs/tags/sdks/go/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.23"
+      - run: cd sdks/go && go test -v ./...
+      - uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+
+  mirror-php-packagist:
+    if: startsWith(github.ref, 'refs/tags/php-v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Sync sdks/php to dedicated Packagist mirror repository
+        if: env.PHP_MIRROR_TOKEN != ''
+        env:
+          PHP_MIRROR_TOKEN: ${{ secrets.PHP_MIRROR_TOKEN }}
+        run: |
+          TAG_VER="${GITHUB_REF_NAME#php-}"
+          git subtree split --prefix=sdks/php -b php-release
+          git push "https://x-access-token:${PHP_MIRROR_TOKEN}@github.com/Konvelbo/lshorter-php.git" php-release:refs/heads/main --force
+          git push "https://x-access-token:${PHP_MIRROR_TOKEN}@github.com/Konvelbo/lshorter-php.git" "php-release:refs/tags/${TAG_VER}"

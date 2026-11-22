@@ -39,3 +39,15 @@ privateReadme.md
 coverage/
 __tests__/
 .playwright-cli/
+
+# multi-language SDK build artifacts
+sdks/python/dist/
+sdks/python/build/
+sdks/python/*.egg-info/
+sdks/python/src/*.egg-info/
+sdks/python/**/__pycache__/
+sdks/python/.pytest_cache/
+sdks/rust/target/
+sdks/rust/Cargo.lock
+sdks/php/vendor/
+sdks/php/.phpunit.cache/
