@@ -87,7 +87,12 @@ webhooks.get("/:id", async (c) => {
     return err("Webhook not found", 404, "NOT_FOUND");
   }
 
-  if (!isFrontendAuth(auth) && row.user_id !== auth.userId) {
+  const isFrontend = isFrontendAuth(auth);
+  const qUserId = c.req.query("userId") || c.req.header("X-User-Id");
+  if (
+    (!isFrontend && row.user_id !== auth.userId) ||
+    (isFrontend && qUserId && qUserId !== "usr_default" && row.user_id !== qUserId)
+  ) {
     return err("Forbidden", 403, "FORBIDDEN");
   }
 
@@ -101,9 +106,11 @@ webhooks.post(
   async (c) => {
     const auth = c.get("auth");
     const isFrontend = isFrontendAuth(auth);
+    const explicitHeaderPlan = c.req.header("X-User-Plan")?.toUpperCase();
+    const effectivePlan = explicitHeaderPlan || String(auth.plan || "").toUpperCase();
 
-    // Server-side plan gating for public API keys (Free/Starter cannot provision webhooks)
-    if (!isFrontend && !PAID_PLANS.has(String(auth.plan || "").toUpperCase())) {
+    // Server-side plan gating (Free/Starter cannot provision webhooks)
+    if ((!isFrontend || explicitHeaderPlan) && !PAID_PLANS.has(effectivePlan)) {
       return err(
         "Webhooks require a PRO, BUSINESS, or ENTERPRISE subscription.",
         403,
@@ -211,10 +218,12 @@ webhooks.patch(
     );
   }
 
-  // Prevent downgraded free-tier public API keys from reactivating or repointing webhooks
+  // Prevent downgraded free-tier callers from reactivating or repointing webhooks
+  const explicitHeaderPlan = c.req.header("X-User-Plan")?.toUpperCase();
+  const effectivePlan = explicitHeaderPlan || String(auth.plan || "").toUpperCase();
   if (
-    !isFrontend &&
-    !PAID_PLANS.has(String(auth.plan || "").toUpperCase()) &&
+    (!isFrontend || explicitHeaderPlan) &&
+    !PAID_PLANS.has(effectivePlan) &&
     (parsed.data.isActive === true || parsed.data.url !== undefined || parsed.data.events !== undefined)
   ) {
     return err(
@@ -234,7 +243,11 @@ webhooks.patch(
     return err("Webhook not found", 404, "NOT_FOUND");
   }
 
-  if (!isFrontend && existing.user_id !== auth.userId) {
+  const qUserId = c.req.query("userId") || c.req.header("X-User-Id");
+  if (
+    (!isFrontend && existing.user_id !== auth.userId) ||
+    (isFrontend && qUserId && qUserId !== "usr_default" && existing.user_id !== qUserId)
+  ) {
     return err("Forbidden", 403, "FORBIDDEN");
   }
 
@@ -304,7 +317,12 @@ webhooks.delete(
     return err("Webhook not found", 404, "NOT_FOUND");
   }
 
-  if (!isFrontendAuth(auth) && existing.user_id !== auth.userId) {
+  const isFrontend = isFrontendAuth(auth);
+  const qUserId = c.req.query("userId") || c.req.header("X-User-Id");
+  if (
+    (!isFrontend && existing.user_id !== auth.userId) ||
+    (isFrontend && qUserId && qUserId !== "usr_default" && existing.user_id !== qUserId)
+  ) {
     return err("Forbidden", 403, "FORBIDDEN");
   }
 

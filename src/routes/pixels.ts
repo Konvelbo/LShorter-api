@@ -69,7 +69,12 @@ pixels.get("/:id", async (c) => {
     return err("Pixel not found", 404, "NOT_FOUND");
   }
 
-  if (!isFrontendAuth(auth) && row.user_id !== auth.userId) {
+  const isFrontend = isFrontendAuth(auth);
+  const qUserId = c.req.query("userId") || c.req.header("X-User-Id");
+  if (
+    (!isFrontend && row.user_id !== auth.userId) ||
+    (isFrontend && qUserId && qUserId !== "usr_default" && row.user_id !== qUserId)
+  ) {
     return err("Forbidden", 403, "FORBIDDEN");
   }
 
@@ -83,9 +88,11 @@ pixels.post(
   async (c) => {
     const auth = c.get("auth");
     const isFrontend = isFrontendAuth(auth);
+    const explicitHeaderPlan = c.req.header("X-User-Plan")?.toUpperCase();
+    const effectivePlan = explicitHeaderPlan || String(auth.plan || "").toUpperCase();
 
-    // Server-side plan gating for public API keys (Free/Starter cannot create pixels)
-    if (!isFrontend && !PAID_PLANS.has(String(auth.plan || "").toUpperCase())) {
+    // Server-side plan gating (Free/Starter cannot create pixels)
+    if ((!isFrontend || explicitHeaderPlan) && !PAID_PLANS.has(effectivePlan)) {
       return err(
         "Retargeting pixels require a PRO, BUSINESS, or ENTERPRISE subscription.",
         403,
@@ -187,9 +194,11 @@ pixels.patch(
     );
   }
 
+  const explicitHeaderPlan = c.req.header("X-User-Plan")?.toUpperCase();
+  const effectivePlan = explicitHeaderPlan || String(auth.plan || "").toUpperCase();
   if (
-    !isFrontend &&
-    !PAID_PLANS.has(String(auth.plan || "").toUpperCase()) &&
+    (!isFrontend || explicitHeaderPlan) &&
+    !PAID_PLANS.has(effectivePlan) &&
     (parsed.data.isActive === true || parsed.data.pixelId !== undefined)
   ) {
     return err(
@@ -209,7 +218,11 @@ pixels.patch(
     return err("Pixel not found", 404, "NOT_FOUND");
   }
 
-  if (!isFrontendAuth(auth) && existing.user_id !== auth.userId) {
+  const qUserId = c.req.query("userId") || c.req.header("X-User-Id");
+  if (
+    (!isFrontend && existing.user_id !== auth.userId) ||
+    (isFrontend && qUserId && qUserId !== "usr_default" && existing.user_id !== qUserId)
+  ) {
     return err("Forbidden", 403, "FORBIDDEN");
   }
 
@@ -267,7 +280,12 @@ pixels.delete(
     return err("Pixel not found", 404, "NOT_FOUND");
   }
 
-  if (!isFrontendAuth(auth) && existing.user_id !== auth.userId) {
+  const isFrontend = isFrontendAuth(auth);
+  const qUserId = c.req.query("userId") || c.req.header("X-User-Id");
+  if (
+    (!isFrontend && existing.user_id !== auth.userId) ||
+    (isFrontend && qUserId && qUserId !== "usr_default" && existing.user_id !== qUserId)
+  ) {
     return err("Forbidden", 403, "FORBIDDEN");
   }
 

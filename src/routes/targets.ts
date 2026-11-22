@@ -192,8 +192,22 @@ targets.post("/", async (c) => {
   for (const item of targetsToProcess) {
     const linkId = (!item.linkId || item.linkId === "global") ? null : item.linkId;
 
-    // Secure Plan Gating: Individual link alerts strictly require PRO, BUSINESS, or ENTERPRISE
+    // Secure Plan Gating & Link Ownership: Individual link alerts strictly require PRO, BUSINESS, or ENTERPRISE and link ownership
     if (linkId) {
+      const linkRow = await c.env.DB.prepare(
+        "SELECT id, user_id FROM links WHERE id = ? LIMIT 1"
+      )
+        .bind(linkId)
+        .first<{ id: string; user_id: string }>()
+        .catch(() => null);
+
+      if (!linkRow) {
+        return err("Link not found", 404, "NOT_FOUND");
+      }
+      if (linkRow.user_id !== userId) {
+        return err("Forbidden: link does not belong to your account", 403, "FORBIDDEN");
+      }
+
       const userPlanParam = (body.userPlan || body.plan || auth.plan || "").toUpperCase();
       const isProParam = userPlanParam === "PRO" || userPlanParam === "BUSINESS" || userPlanParam === "ENTERPRISE";
       let hasProPlan = false;
@@ -369,7 +383,10 @@ targets.patch("/:id", async (c) => {
   ).bind(id).first<{ id: string; user_id: string; link_id: string | null; period: string; notify_email: number; notify_bell: number }>();
 
   if (!alert) return err("Target alert not found", 404, "NOT_FOUND");
-  if (!isFrontend && alert.user_id !== userId) {
+  if (
+    (!isFrontend && alert.user_id !== userId) ||
+    (isFrontend && qUserId && qUserId !== "usr_default" && alert.user_id !== userId)
+  ) {
     return err("Forbidden: alert does not belong to your account", 403, "FORBIDDEN");
   }
 
@@ -458,7 +475,10 @@ targets.delete("/:id", async (c) => {
   ).bind(id).first<{ id: string; user_id: string; link_id: string | null }>();
 
   if (!alert) return err("Target alert not found", 404, "NOT_FOUND");
-  if (!isFrontend && alert.user_id !== userId) {
+  if (
+    (!isFrontend && alert.user_id !== userId) ||
+    (isFrontend && qUserId && qUserId !== "usr_default" && alert.user_id !== userId)
+  ) {
     return err("Forbidden: alert does not belong to your account", 403, "FORBIDDEN");
   }
 

@@ -1269,6 +1269,120 @@ describe("LShorter API Security Hardening & 9-Platform Pixels", () => {
     );
     expect(pauseFree.status).toBe(200);
   });
+
+  it("enforces X-User-Id multi-tenant ownership and X-User-Plan gating even on X-Frontend-Secret proxy requests", async () => {
+    store.targets.set("tgt_victim_1", {
+      id: "tgt_victim_1",
+      user_id: "usr_victim",
+      link_id: "link_victim_1",
+      metric_type: "clicks",
+      target_value: 1000,
+      period: "month",
+      status: "active",
+    });
+
+    const proxyFreeHeaders = {
+      "X-Frontend-Secret": FRONTEND_SECRET,
+      "X-User-Id": "usr_free",
+      "X-User-Plan": "FREEMIUM",
+      "Content-Type": "application/json",
+    };
+
+    // 1. Proxy request for usr_free cannot read/update/delete usr_victim's link, webhook, pixel, or target
+    for (const [method, url, body] of [
+      ["GET", "https://api.test/api/v1/links/link_victim_1", undefined],
+      ["PATCH", "https://api.test/api/v1/links/link_victim_1", { targetUrl: "https://evil.example/takeover" }],
+      ["DELETE", "https://api.test/api/v1/links/link_victim_1", undefined],
+      ["GET", "https://api.test/api/v1/webhooks/wh_victim_1", undefined],
+      ["PATCH", "https://api.test/api/v1/webhooks/wh_victim_1", { url: "https://hooks.example.com/evil" }],
+      ["DELETE", "https://api.test/api/v1/webhooks/wh_victim_1", undefined],
+      ["GET", "https://api.test/api/v1/pixels/px_victim_1", undefined],
+      ["PATCH", "https://api.test/api/v1/pixels/px_victim_1", { name: "Evil Pixel" }],
+      ["DELETE", "https://api.test/api/v1/pixels/px_victim_1", undefined],
+      ["PATCH", "https://api.test/api/v1/targets/tgt_victim_1", { targetValue: 9999 }],
+      ["DELETE", "https://api.test/api/v1/targets/tgt_victim_1", undefined],
+    ] as const) {
+      const res = await app.fetch(
+        new Request(url, {
+          method,
+          headers: proxyFreeHeaders,
+          body: body ? JSON.stringify(body) : undefined,
+        }),
+        env,
+        execCtx,
+      );
+      expect(res.status, `${method} ${url}`).toBe(403);
+    }
+
+    // 2. Proxy request for usr_attacker (PRO) cannot attach a target alert to usr_victim's linkId
+    const crossLinkTarget = await app.fetch(
+      new Request("https://api.test/api/v1/targets", {
+        method: "POST",
+        headers: {
+          "X-Frontend-Secret": FRONTEND_SECRET,
+          "X-User-Id": "usr_attacker",
+          "X-User-Plan": "PRO",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          userId: "usr_attacker",
+          userPlan: "PRO",
+          linkId: "link_victim_1",
+          metricType: "clicks",
+          targetValue: 500,
+          period: "month",
+        }),
+      }),
+      env,
+      execCtx,
+    );
+    expect(crossLinkTarget.status).toBe(403);
+
+    // 3. Proxy request with X-User-Plan: FREEMIUM cannot create webhooks or pixels
+    const freeProxyWh = await app.fetch(
+      new Request("https://api.test/api/v1/webhooks", {
+        method: "POST",
+        headers: proxyFreeHeaders,
+        body: JSON.stringify({ url: "https://hooks.example.com/free", events: ["click.created"] }),
+      }),
+      env,
+      execCtx,
+    );
+    expect(freeProxyWh.status).toBe(403);
+
+    const freeProxyPx = await app.fetch(
+      new Request("https://api.test/api/v1/pixels", {
+        method: "POST",
+        headers: proxyFreeHeaders,
+        body: JSON.stringify({ platform: "meta", pixelId: "1234567890", name: "Free Meta" }),
+      }),
+      env,
+      execCtx,
+    );
+    expect(freeProxyPx.status).toBe(403);
+
+    // 4. Internal frontend guest-hero shortener (gst_*) CAN set 24h expiresAt on FREE plan
+    const guestHeroRes = await app.fetch(
+      new Request("https://api.test/api/v1/links", {
+        method: "POST",
+        headers: {
+          "X-Frontend-Secret": FRONTEND_SECRET,
+          "X-User-Id": "gst_testguest123",
+          "X-User-Plan": "FREE",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          targetUrl: "https://example.com/guest-hero",
+          userId: "gst_testguest123",
+          plan: "FREE",
+          expiresAt: new Date(Date.now() + 86400_000).toISOString(),
+        }),
+      }),
+      env,
+      execCtx,
+    );
+    expect(guestHeroRes.status).toBe(201);
+  });
 });
 
 function ctxStub(c: any) {

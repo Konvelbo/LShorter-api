@@ -544,6 +544,11 @@ links.post(
     }
 
     // Link Protection, Password, Cloaking, Click Limits & Expiry require PRO or higher
+    // (Exception: internal frontend guest-hero shortener links have an automatic 24h expiresAt TTL)
+    const isGuestHeroLink =
+      isFrontendCaller &&
+      typeof userId === "string" &&
+      userId.startsWith("gst_");
     const rawMaxClicks =
       (parsed.data as any).maxClicks !== undefined
         ? (parsed.data as any).maxClicks
@@ -554,7 +559,7 @@ links.post(
       password ||
       isCloaked ||
       hideReferrer ||
-      expiresAt ||
+      (expiresAt && !isGuestHeroLink) ||
       (rawMaxClicks !== undefined && rawMaxClicks !== null && rawMaxClicks !== "" && Number(rawMaxClicks) > 0) ||
       rawFallbackUrl
     );
@@ -930,8 +935,13 @@ links.patch("/:id", async (c) => {
 
   if (!existing) return err("Link not found", 404, "NOT_FOUND");
   const isFrontendValid = isFrontendAuth(c.get("auth"));
+  const explicitUserId = c.req.query("userId") || c.req.header("X-User-Id");
+  const effectiveUserId = isFrontendValid && explicitUserId ? explicitUserId : userId;
 
-  if (!isFrontendValid && existing.user_id !== userId) {
+  if (
+    (!isFrontendValid && existing.user_id !== userId) ||
+    (isFrontendValid && explicitUserId && explicitUserId !== "usr_default" && existing.user_id !== effectiveUserId)
+  ) {
     return err("Forbidden", 403, "FORBIDDEN");
   }
 
@@ -1721,7 +1731,11 @@ links.get("/:id", async (c) => {
   if (!row) return err("Link not found", 404, "NOT_FOUND");
 
   const link = row as Record<string, any>;
-  if (!isFrontend && link["user_id"] !== userId) {
+  const explicitUserId = c.req.query("userId") || c.req.header("X-User-Id");
+  if (
+    (!isFrontend && link["user_id"] !== userId) ||
+    (isFrontend && explicitUserId && explicitUserId !== "usr_default" && link["user_id"] !== explicitUserId)
+  ) {
     return err("Forbidden", 403, "FORBIDDEN");
   }
 
@@ -1895,11 +1909,12 @@ links.post("/bulk-delete", async (c) => {
     const chunk = ids.slice(i, i + chunkSize);
     const placeholders = chunk.map(() => "?").join(",");
 
-    const selectSql = isFrontend
+    const enforceOwnerOnBulk = !isFrontend || (Boolean(queryUserId) && queryUserId !== "usr_default");
+    const selectSql = !enforceOwnerOnBulk
       ? `SELECT id, domain_name, slug, og_image, user_id FROM links WHERE id IN (${placeholders})`
       : `SELECT id, domain_name, slug, og_image, user_id FROM links WHERE id IN (${placeholders}) AND user_id = ?`;
 
-    const selectBindings = isFrontend
+    const selectBindings = !enforceOwnerOnBulk
       ? chunk
       : [...chunk, effectiveUserId];
 
@@ -1980,7 +1995,12 @@ links.delete("/:id", async (c) => {
     }>();
 
   if (!row) return err("Link not found", 404, "NOT_FOUND");
-  if (!isFrontend && row.user_id !== userId) {
+  const explicitUserId = c.req.query("userId") || c.req.header("X-User-Id");
+  const effectiveUserId = isFrontend && explicitUserId ? explicitUserId : userId;
+  if (
+    (!isFrontend && row.user_id !== userId) ||
+    (isFrontend && explicitUserId && explicitUserId !== "usr_default" && row.user_id !== effectiveUserId)
+  ) {
     return err("Forbidden", 403, "FORBIDDEN");
   }
 
