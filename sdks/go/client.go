@@ -376,6 +376,14 @@ func (s *DomainsService) List(ctx context.Context) ([]map[string]any, error) {
 	return res, nil
 }
 
+func (s *DomainsService) Get(ctx context.Context, id string) (map[string]any, error) {
+	var res map[string]any
+	if _, err := s.c.doJSON(ctx, http.MethodGet, "/api/v1/domains/"+url.PathEscape(id), nil, nil, &res); err != nil {
+		return nil, err
+	}
+	return res, nil
+}
+
 func (s *DomainsService) Verify(ctx context.Context, id string) (*DomainResponse, error) {
 	var res DomainResponse
 	if _, err := s.c.doJSON(ctx, http.MethodPost, "/api/v1/domains/"+url.PathEscape(id)+"/verify", nil, map[string]any{}, &res); err != nil {
