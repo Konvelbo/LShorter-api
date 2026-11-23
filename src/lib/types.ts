@@ -11,6 +11,7 @@ export interface CloudflareBindings {
   FRONTEND_API_SECRET: string;
   HASH_SALT?: string;
   ALLOWED_ORIGINS?: string;
+  PUBLIC_API_URL?: string;
 }
 
 // ─── Plan ────────────────────────────────────────────────────────────────────

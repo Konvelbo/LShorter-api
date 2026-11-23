@@ -104,7 +104,8 @@ function isSocialBot(userAgent: string): boolean {
 }
 
 // ─── OpenGraph & Twitter Card Preview Page for Social Networks ────────────────
-function socialPreviewPage(link: CachedLink, destination: string, shortUrl: string): Response {
+function socialPreviewPage(link: CachedLink, destination: string, shortUrl: string, apiOrigin: string): Response {
+  const safeBaseOrigin = apiOrigin.replace(/\/+$/, '');
   const title = link.ogTitle || link.metaTitle || 'LShorter — Smart Link Shortened';
   const description = link.ogDescription || 'Redirection instantanée optimisée par le réseau Edge mondial LShorter.';
   const rawBannerStyle = (link as any).bannerStyle || (link as any).banner_style;
@@ -117,16 +118,16 @@ function socialPreviewPage(link: CachedLink, destination: string, shortUrl: stri
 
   let image = link.ogImage || (link as any).banner_url || (link as any).bannerUrl || (link as any).imageUrl || '';
   if (image && !image.startsWith('http://') && !image.startsWith('https://')) {
-    image = `https://lshorter-api.fiatechnologiecam.workers.dev${image.startsWith('/') ? '' : '/'}${image}`;
+    image = `${safeBaseOrigin}${image.startsWith('/') ? '' : '/'}${image}`;
   }
 
   if (cardType === 'summary') {
     if (!image || image.includes('/api/og') || image.includes('default_banner')) {
-      image = 'https://lshorter-api.fiatechnologiecam.workers.dev/api/v1/images/default_icon.png';
+      image = `${safeBaseOrigin}/api/v1/images/default_icon.png`;
     }
   } else {
     if (!image) {
-      image = 'https://lshorter-api.fiatechnologiecam.workers.dev/api/v1/images/default_banner.jpg';
+      image = `${safeBaseOrigin}/api/v1/images/default_banner.jpg`;
     }
   }
 
@@ -1057,7 +1058,8 @@ async function handleRedirect(
   if (isBot || isPreview) {
     const reqUrl = new URL(c.req.url);
     const fullShortUrl = `${reqUrl.protocol}//${reqUrl.host}${reqUrl.pathname}`;
-    return socialPreviewPage(link, destination, fullShortUrl);
+    const apiOrigin = c.env.PUBLIC_API_URL || reqUrl.origin;
+    return socialPreviewPage(link, destination, fullShortUrl, apiOrigin);
   }
 
   const isInternalProbe =

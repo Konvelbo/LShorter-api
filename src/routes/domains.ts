@@ -227,11 +227,12 @@ domains.post('/:id/verify', async (c) => {
       'lsho.cc',
       'cname.lsho.cc',
       'cname.lshorter.cc',
-      'lshorter-api.fiatechnologiecam.workers.dev',
     ]);
 
     const txtVerified = txtAnswers.some((v: string) => v.includes(expectedTxtValue));
-    const cnameVerified = cnameAnswers.some((v: string) => ALLOWED_CNAME_TARGETS.has(v));
+    const cnameVerified = cnameAnswers.some(
+      (v: string) => ALLOWED_CNAME_TARGETS.has(v) || v.endsWith('.workers.dev')
+    );
 
     if (txtVerified || cnameVerified) {
       await c.env.DB.prepare(`UPDATE custom_domains SET status = 'active' WHERE id = ? AND user_id = ?`)

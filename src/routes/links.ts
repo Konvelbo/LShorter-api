@@ -41,7 +41,7 @@ function isSelfReferencingTarget(targetUrl: string, defaultDomain: string, resol
       host === defDom ||
       host.endsWith(`.${defDom}`) ||
       host === resDom ||
-      host === "lshorter-api.fiatechnologiecam.workers.dev"
+      host.endsWith(".workers.dev")
     );
   } catch {
     return true;
@@ -311,14 +311,20 @@ function qrCodeUrl(shortUrl: string): string {
 async function normalizeOgImage(
   env: CloudflareBindings,
   imageStr?: string | null,
+  requestOrigin?: string,
 ): Promise<string | null> {
   if (!imageStr) return null;
   const trimmed = imageStr.trim();
+  const baseApiOrigin = (
+    env.PUBLIC_API_URL ||
+    requestOrigin ||
+    `https://api.${env.DEFAULT_DOMAIN || "lsho.cc"}`
+  ).replace(/\/+$/, "");
   if (trimmed.startsWith("http://") || trimmed.startsWith("https://"))
     return trimmed;
   if (trimmed.startsWith("/api/images/")) {
     const filename = trimmed.replace("/api/images/", "");
-    return `https://lshorter-api.fiatechnologiecam.workers.dev/api/v1/images/${filename}`;
+    return `${baseApiOrigin}/api/v1/images/${filename}`;
   }
   if (
     trimmed.startsWith("banner_") &&
@@ -328,7 +334,7 @@ async function normalizeOgImage(
       trimmed.endsWith(".webp") ||
       trimmed.endsWith(".gif"))
   ) {
-    return `https://lshorter-api.fiatechnologiecam.workers.dev/api/v1/images/${trimmed}`;
+    return `${baseApiOrigin}/api/v1/images/${trimmed}`;
   }
   if (trimmed.startsWith("data:image/")) {
     try {
@@ -372,7 +378,7 @@ async function normalizeOgImage(
         }
       } catch {}
 
-      return `https://lshorter-api.fiatechnologiecam.workers.dev/api/v1/images/${imageId}`;
+      return `${baseApiOrigin}/api/v1/images/${imageId}`;
     } catch (e) {
       console.error("[normalizeOgImage error]", e);
       return null;
@@ -450,7 +456,8 @@ links.post(
     } = parsed.data;
 
     const effectiveOgImage = ogImage || (parsed.data as any).og_image;
-    const resolvedOgImage = await normalizeOgImage(c.env, effectiveOgImage);
+    const reqOrigin = new URL(c.req.url).origin;
+    const resolvedOgImage = await normalizeOgImage(c.env, effectiveOgImage, reqOrigin);
 
     const { bannerStyle: finalBannerStyle, twitterCard: finalTwitterCard } =
       resolveBannerStyle({
@@ -487,12 +494,13 @@ links.post(
       );
     }
 
+    const requestHost = new URL(c.req.url).host.toLowerCase();
     const SYSTEM_DOMAINS = new Set([
       "lsho.cc",
       "www.lsho.cc",
       "api.lsho.cc",
-      "lshorter-api.fiatechnologiecam.workers.dev",
-      "lshorter-api.fiatechnologiecam.workers.dev/r",
+      requestHost,
+      `${requestHost}/r`,
       (c.env.DEFAULT_DOMAIN || "lsho.cc").toLowerCase(),
     ]);
     const isCustomDomain = Boolean(
@@ -503,7 +511,7 @@ links.post(
     const resolvedDomain = isCustomDomain
       ? domainName!
       : domainName?.includes("workers.dev")
-        ? "lshorter-api.fiatechnologiecam.workers.dev/r"
+        ? `${requestHost}/r`
         : c.env.DEFAULT_DOMAIN || "lsho.cc";
 
     // Infinite redirect check
@@ -1187,7 +1195,7 @@ links.patch("/:id", async (c) => {
       ? updates.ogImage
       : (updates as any).og_image;
   if (effectiveOgImage !== undefined) {
-    const resolvedImg = await normalizeOgImage(c.env, effectiveOgImage);
+    const resolvedImg = await normalizeOgImage(c.env, effectiveOgImage, new URL(c.req.url).origin);
     setParts.push("og_image = ?");
     bindings.push(resolvedImg ?? null);
 

@@ -591,14 +591,17 @@ const SELF_WEBHOOK_HOSTS = new Set([
   "lsho.cc",
   "www.lsho.cc",
   "api.lsho.cc",
-  "lshorter-api.fiatechnologiecam.workers.dev",
 ]);
 
 const safeWebhookUrl = safeUrl.refine(
   (u) => {
     try {
       const host = new URL(u).hostname.toLowerCase().replace(/\.$/, "");
-      if (SELF_WEBHOOK_HOSTS.has(host) || host.endsWith(".lsho.cc")) {
+      if (
+        SELF_WEBHOOK_HOSTS.has(host) ||
+        host.endsWith(".lsho.cc") ||
+        host.endsWith(".workers.dev")
+      ) {
         return false;
       }
       return true;

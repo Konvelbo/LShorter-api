@@ -297,10 +297,7 @@ class HttpClient {
   private readonly apiKey:  string;
 
   constructor(config: QuickLinkConfig) {
-    let base = (config.baseUrl ?? 'https://lshorter-api.fiatechnologiecam.workers.dev').replace(/\/$/, '');
-    if (base === 'https://lsho.cc' || base === 'https://api.lsho.cc') {
-      base = 'https://lshorter-api.fiatechnologiecam.workers.dev';
-    }
+    const base = (config.baseUrl ?? 'https://api.lsho.cc').replace(/\/$/, '');
     this.baseUrl = base;
     this.apiKey  = config.apiKey;
   }

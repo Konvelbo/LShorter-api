@@ -63,7 +63,7 @@ app.use("*", async (c, next) => {
 
   const rawOrigins =
     c.env.ALLOWED_ORIGINS ||
-    "http://localhost:3000,https://lsho.cc,https://lshorter-api.fiatechnologiecam.workers.dev";
+    "http://localhost:3000,https://lsho.cc";
   const allowedList = rawOrigins.split(",").map((o) => o.trim());
 
   return cors({
@@ -341,7 +341,8 @@ app.post(
         }
       } catch {}
 
-      const publicUrl = `https://lshorter-api.fiatechnologiecam.workers.dev/api/v1/images/${imageId}`;
+      const apiOrigin = (c.env.PUBLIC_API_URL || new URL(c.req.url).origin).replace(/\/+$/, "");
+      const publicUrl = `${apiOrigin}/api/v1/images/${imageId}`;
       return c.json({ success: true, url: publicUrl, imageId });
     } catch (uploadErr: any) {
       console.error("Upload error:", uploadErr);
