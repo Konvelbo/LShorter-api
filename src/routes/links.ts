@@ -406,19 +406,14 @@ links.post(
 
     const userId = callerId;
     const requestedPlanInBody = (body as any)?.userPlan || (body as any)?.plan;
-    const headerEmail = c.req.header('X-User-Email')?.toLowerCase();
     const headerPlan = c.req.header('X-User-Plan')?.toUpperCase();
     const isFrontendCaller = isFrontendAuth(c.get("auth"));
     let plan = callerPlan;
-    if (
-      userId === 'usr_1790454166066_fwlb48z' ||
-      userId === '7254d43d-caf7-487d-bd22-1666795253a2' ||
-      (isFrontendCaller && (headerEmail === 'fiatechnologiecam@gmail.com' || headerPlan === 'ENTERPRISE'))
-    ) {
-      plan = 'ENTERPRISE' as any;
+    if (isFrontendCaller && headerPlan && ['ENTERPRISE', 'BUSINESS', 'PRO', 'FREEMIUM', 'FREE', 'STARTER'].includes(headerPlan)) {
+      plan = headerPlan as any;
     } else if (isFrontendCaller && requestedPlanInBody) {
       const p = String(requestedPlanInBody).toUpperCase();
-      if (['ENTERPRISE', 'BUSINESS', 'PRO'].includes(p)) {
+      if (['ENTERPRISE', 'BUSINESS', 'PRO', 'FREEMIUM', 'FREE', 'STARTER'].includes(p)) {
         plan = p as any;
       }
     }
@@ -953,18 +948,13 @@ links.patch("/:id", async (c) => {
   }
 
   const requestedPlanInBody = (body as any)?.userPlan || (body as any)?.plan;
-  const headerEmail = c.req.header('X-User-Email')?.toLowerCase();
   const headerPlan = c.req.header('X-User-Plan')?.toUpperCase();
   let plan = callerPlan;
-  if (
-    userId === 'usr_1790454166066_fwlb48z' ||
-    userId === '7254d43d-caf7-487d-bd22-1666795253a2' ||
-    (isFrontendValid && (headerEmail === 'fiatechnologiecam@gmail.com' || headerPlan === 'ENTERPRISE'))
-  ) {
-    plan = 'ENTERPRISE' as any;
+  if (isFrontendValid && headerPlan && ['ENTERPRISE', 'BUSINESS', 'PRO', 'FREEMIUM', 'FREE', 'STARTER'].includes(headerPlan)) {
+    plan = headerPlan as any;
   } else if (isFrontendValid && requestedPlanInBody) {
     const p = String(requestedPlanInBody).toUpperCase();
-    if (["ENTERPRISE", "BUSINESS", "PRO"].includes(p)) {
+    if (["ENTERPRISE", "BUSINESS", "PRO", "FREEMIUM", "FREE", "STARTER"].includes(p)) {
       plan = p as any;
     }
   }
