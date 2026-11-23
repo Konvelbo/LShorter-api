@@ -617,7 +617,17 @@ const optionalWebhookSecret = z.preprocess(
   z.string().trim().min(8, "Webhook secretKey must be at least 8 characters").max(256).optional(),
 );
 
+const optionalWebhookName = z.preprocess(
+  (v) => (typeof v === "string" ? v.trim() : v),
+  z
+    .string()
+    .max(100, "Webhook name must be at most 100 characters")
+    .refine((s) => !/[<>]/.test(s), "Webhook name cannot contain HTML characters")
+    .optional(),
+);
+
 export const CreateWebhookSchema = z.object({
+  name: optionalWebhookName,
   url: safeWebhookUrl,
   events: z
     .array(z.enum(WEBHOOK_EVENTS))
@@ -632,9 +642,9 @@ export const CreateWebhookSchema = z.object({
 export type CreateWebhookInput = z.infer<typeof CreateWebhookSchema>;
 
 export const UpdateWebhookSchema = z.object({
+  name: optionalWebhookName,
   url: safeWebhookUrl.optional(),
   events: z.array(z.enum(WEBHOOK_EVENTS)).min(1).max(20).optional(),
-  secretKey: optionalWebhookSecret,
   isActive: z.boolean().optional(),
   lastStatus: z.number().optional(),
   lastTriggeredAt: z.string().optional(),

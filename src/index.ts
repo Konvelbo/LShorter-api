@@ -2,7 +2,7 @@
 // ENTRY POINT — Hono Application
 // =================================================================
 
-import { Hono } from "hono";
+import { Hono, type Context } from "hono";
 import { cors } from "hono/cors";
 import { logger } from "hono/logger";
 import { secureHeaders } from "hono/secure-headers";
@@ -48,9 +48,9 @@ app.use(
   }),
 );
 
-// CORS — strict configuration for API, open for public image assets
+// CORS — strict configuration for API, open for public image assets & banners
 app.use("*", async (c, next) => {
-  if (c.req.path.startsWith("/api/v1/images/")) {
+  if (c.req.path.startsWith("/api/v1/images/") || c.req.path.startsWith("/banners/")) {
     c.header("Access-Control-Allow-Origin", "*");
     c.header("Access-Control-Allow-Methods", "GET, HEAD, OPTIONS");
     c.header("Cross-Origin-Resource-Policy", "cross-origin");
@@ -157,9 +157,39 @@ function hasValidImageMagicBytes(bytes: Uint8Array, mime: string): boolean {
   return false;
 }
 
+// ─── Robots.txt for Custom Branded Domains & Edge Social Crawlers ────────────
+app.get("/robots.txt", (c) => {
+  const txt = [
+    "User-agent: *",
+    "Allow: /",
+    "Allow: /r/",
+    "Allow: /banners/",
+    "Allow: /api/v1/images/",
+    "Disallow: /api/v1/users/",
+    "Disallow: /api/v1/links/",
+    "Disallow: /api/v1/webhooks/",
+    "Disallow: /api/v1/pixels/",
+    "Disallow: /api/v1/analytics/",
+    "Disallow: /api/v1/domains/",
+    "",
+  ].join("\n");
+  return new Response(txt, {
+    status: 200,
+    headers: {
+      "Content-Type": "text/plain; charset=utf-8",
+      "Cache-Control": "public, max-age=86400",
+    },
+  });
+});
+
 // ─── Public Image Asset Server for Social Previews & Banners ─────────────────
-app.on(["GET", "HEAD"], "/api/v1/images/:id", async (c) => {
-  const id = c.req.param("id");
+const servePublicImage = async (c: Context<{ Bindings: CloudflareBindings; Variables: { auth: AuthContext } }>) => {
+  const id = c.req.param("id") || "";
+  if (id === "og.png" || id === "og") {
+    const cleanDefault = (c.env.DEFAULT_DOMAIN || "lsho.cc").replace(/^https?:\/\//i, "").replace(/\/+$/, "");
+    const search = new URL(c.req.url).search || "";
+    return c.redirect(`https://${cleanDefault}/banners/og.png${search}`, 302);
+  }
   if (!/^[a-zA-Z0-9._-]{1,120}$/.test(id)) {
     return c.text("Invalid image ID", 400);
   }
@@ -222,7 +252,10 @@ app.on(["GET", "HEAD"], "/api/v1/images/:id", async (c) => {
   }
 
   return new Response(data, { status: 200, headers });
-});
+};
+
+app.on(["GET", "HEAD"], "/api/v1/images/:id", servePublicImage);
+app.on(["GET", "HEAD"], "/banners/:id", servePublicImage);
 
 // ─── Image Upload Endpoint for Banners & Logos (Authenticated + Strict MIME) ─
 app.post(

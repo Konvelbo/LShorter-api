@@ -139,6 +139,7 @@ CREATE TABLE IF NOT EXISTS api_keys (
 CREATE TABLE IF NOT EXISTS webhooks (
     id TEXT PRIMARY KEY,
     user_id TEXT NOT NULL,
+    name TEXT DEFAULT '',
     url TEXT NOT NULL,
     events TEXT NOT NULL, -- JSON array
     secret_key TEXT NOT NULL,

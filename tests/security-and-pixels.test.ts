@@ -299,17 +299,32 @@ function createMockEnv(store: MockStore) {
           }
 
           if (s.startsWith("INSERT INTO webhooks")) {
-            const row = {
-              id: binds[0],
-              user_id: binds[1],
-              url: binds[2],
-              events: binds[3],
-              secret_key: binds[4],
-              is_active: binds[5],
-              last_triggered_at: null,
-              last_status: 200,
-              created_at: binds[6],
-            };
+            const hasName = s.includes("name,");
+            const row = hasName
+              ? {
+                  id: binds[0],
+                  user_id: binds[1],
+                  name: binds[2],
+                  url: binds[3],
+                  events: binds[4],
+                  secret_key: binds[5],
+                  is_active: binds[6],
+                  last_triggered_at: null,
+                  last_status: 200,
+                  created_at: binds[7],
+                }
+              : {
+                  id: binds[0],
+                  user_id: binds[1],
+                  name: "",
+                  url: binds[2],
+                  events: binds[3],
+                  secret_key: binds[4],
+                  is_active: binds[5],
+                  last_triggered_at: null,
+                  last_status: 200,
+                  created_at: binds[6],
+                };
             store.webhooks.set(row.id, row);
             return { meta: { changes: 1 } };
           }
@@ -318,8 +333,11 @@ function createMockEnv(store: MockStore) {
             const id = binds[binds.length - 1];
             const row = store.webhooks.get(id);
             if (row) {
-              if (s.includes("is_active = ?")) row.is_active = binds[0];
-              if (s.includes("last_status = ?")) row.last_status = 999;
+              const setClause = s.slice("UPDATE webhooks SET ".length, s.indexOf(" WHERE id = ?"));
+              const cols = setClause.split(",").map((part) => part.trim().split(" ")[0]);
+              cols.forEach((col, i) => {
+                row[col] = binds[i];
+              });
             }
             return { meta: { changes: row ? 1 : 0 } };
           }
@@ -1382,6 +1400,72 @@ describe("LShorter API Security Hardening & 9-Platform Pixels", () => {
       execCtx,
     );
     expect(guestHeroRes.status).toBe(201);
+  });
+
+  it("persists webhook name on create/update, blocks HTML XSS in name, and keeps HMAC secretKey strictly read-only on PATCH", async () => {
+    const proHeaders = {
+      Authorization: `Bearer ${PRO_API_KEY}`,
+      "Content-Type": "application/json",
+    };
+
+    // 1. Reject HTML/XSS in webhook name
+    const xssRes = await app.fetch(
+      new Request("https://api.test/api/v1/webhooks", {
+        method: "POST",
+        headers: proHeaders,
+        body: JSON.stringify({
+          name: "<script>alert(1)</script>",
+          url: "https://hooks.example.org/events",
+          events: ["click.created"],
+        }),
+      }),
+      env,
+      execCtx,
+    );
+    expect(xssRes.status).toBe(422);
+
+    // 2. Create webhook with name
+    const createRes = await app.fetch(
+      new Request("https://api.test/api/v1/webhooks", {
+        method: "POST",
+        headers: proHeaders,
+        body: JSON.stringify({
+          name: "CRM Production",
+          url: "https://hooks.example.org/crm",
+          events: ["click.created", "link.created"],
+        }),
+      }),
+      env,
+      execCtx,
+    );
+    expect(createRes.status).toBe(200);
+    const createdJson = (await createRes.json()) as any;
+    const wh = createdJson.data.webhook;
+    expect(wh.name).toBe("CRM Production");
+    expect(wh.secretKey).toMatch(/^whsec_[0-9a-f]{32}$/);
+    const originalSecret = wh.secretKey;
+
+    // 3. PATCH name/url/events and attempt to overwrite secretKey -> secretKey must remain immutable
+    const patchRes = await app.fetch(
+      new Request(`https://api.test/api/v1/webhooks/${wh.id}`, {
+        method: "PATCH",
+        headers: proHeaders,
+        body: JSON.stringify({
+          name: "CRM Staging Updated",
+          url: "https://hooks.example.org/crm-v2",
+          events: ["click.created", "link.updated", "qr.scanned"],
+          secretKey: "whsec_attacker_attempted_override",
+        }),
+      }),
+      env,
+      execCtx,
+    );
+    expect(patchRes.status).toBe(200);
+    const patchedJson = (await patchRes.json()) as any;
+    expect(patchedJson.data.webhook.name).toBe("CRM Staging Updated");
+    expect(patchedJson.data.webhook.url).toBe("https://hooks.example.org/crm-v2");
+    expect(patchedJson.data.webhook.events).toEqual(["click.created", "link.updated", "qr.scanned"]);
+    expect(patchedJson.data.webhook.secretKey).toBe(originalSecret);
   });
 });
 

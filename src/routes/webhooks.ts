@@ -11,6 +11,17 @@ import { uid, ok, err, now } from "../lib/utils";
 
 const MAX_WEBHOOKS_PER_USER = 25;
 const PAID_PLANS = new Set(["PRO", "BUSINESS", "ENTERPRISE"]);
+let hasEnsuredWebhookNameCol = false;
+
+async function ensureWebhookNameColumn(db: D1Database): Promise<void> {
+  if (hasEnsuredWebhookNameCol) return;
+  try {
+    await db.prepare(`ALTER TABLE webhooks ADD COLUMN name TEXT DEFAULT ''`).run();
+  } catch {
+    // Column already exists or handled by test mock
+  }
+  hasEnsuredWebhookNameCol = true;
+}
 
 function generateCryptoWebhookSecret(): string {
   const bytes = new Uint8Array(16);
@@ -40,6 +51,7 @@ function formatWebhookRow(w: any) {
   return {
     id: w.id,
     userId: w.user_id,
+    name: typeof w.name === "string" ? w.name : "",
     url: w.url,
     events: parsedEvents,
     secretKey: w.secret_key,
@@ -53,12 +65,13 @@ function formatWebhookRow(w: any) {
 
 // ─── GET /api/v1/webhooks (List all webhooks for user) ───────────────────────
 webhooks.get("/", async (c) => {
+  await ensureWebhookNameColumn(c.env.DB);
   const auth = c.get("auth");
   const qUserId = c.req.query("userId") || c.req.header("X-User-Id");
   const userId = isFrontendAuth(auth) && qUserId ? qUserId : auth.userId;
 
   const rows = await c.env.DB.prepare(
-    `SELECT id, user_id, url, events, secret_key, is_active, last_triggered_at, last_status, created_at
+    `SELECT id, user_id, name, url, events, secret_key, is_active, last_triggered_at, last_status, created_at
      FROM webhooks
      WHERE user_id = ?
      ORDER BY created_at DESC`,
@@ -72,11 +85,12 @@ webhooks.get("/", async (c) => {
 
 // ─── GET /api/v1/webhooks/:id (Get single webhook) ───────────────────────────
 webhooks.get("/:id", async (c) => {
+  await ensureWebhookNameColumn(c.env.DB);
   const auth = c.get("auth");
   const id = c.req.param("id");
 
   const row = await c.env.DB.prepare(
-    `SELECT id, user_id, url, events, secret_key, is_active, last_triggered_at, last_status, created_at
+    `SELECT id, user_id, name, url, events, secret_key, is_active, last_triggered_at, last_status, created_at
      FROM webhooks
      WHERE id = ?`,
   )
@@ -153,8 +167,10 @@ webhooks.post(
       );
     }
 
-    const { url, events, secretKey, isActive } = parsed.data;
+    await ensureWebhookNameColumn(c.env.DB);
+    const { name, url, events, secretKey, isActive } = parsed.data;
     const id = uid("wh");
+    const finalName = typeof name === "string" ? name.trim() : "";
     const finalSecret = secretKey?.trim() || generateCryptoWebhookSecret();
     const finalEvents =
       Array.isArray(events) && events.length > 0
@@ -163,12 +179,13 @@ webhooks.post(
     const createdAt = now();
 
     await c.env.DB.prepare(
-      `INSERT INTO webhooks (id, user_id, url, events, secret_key, is_active, last_triggered_at, last_status, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, NULL, 200, ?)`,
+      `INSERT INTO webhooks (id, user_id, name, url, events, secret_key, is_active, last_triggered_at, last_status, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, NULL, 200, ?)`,
     )
       .bind(
         id,
         userId,
+        finalName,
         url,
         JSON.stringify(finalEvents),
         finalSecret,
@@ -181,6 +198,7 @@ webhooks.post(
       webhook: {
         id,
         userId,
+        name: finalName,
         url,
         events: finalEvents,
         secretKey: finalSecret,
@@ -218,13 +236,17 @@ webhooks.patch(
     );
   }
 
+  await ensureWebhookNameColumn(c.env.DB);
   // Prevent downgraded free-tier callers from reactivating or repointing webhooks
   const explicitHeaderPlan = c.req.header("X-User-Plan")?.toUpperCase();
   const effectivePlan = explicitHeaderPlan || String(auth.plan || "").toUpperCase();
   if (
     (!isFrontend || explicitHeaderPlan) &&
     !PAID_PLANS.has(effectivePlan) &&
-    (parsed.data.isActive === true || parsed.data.url !== undefined || parsed.data.events !== undefined)
+    (parsed.data.isActive === true ||
+      parsed.data.name !== undefined ||
+      parsed.data.url !== undefined ||
+      parsed.data.events !== undefined)
   ) {
     return err(
       "Webhooks require a PRO, BUSINESS, or ENTERPRISE subscription.",
@@ -254,6 +276,10 @@ webhooks.patch(
   const setParts: string[] = [];
   const bindings: any[] = [];
 
+  if (parsed.data.name !== undefined) {
+    setParts.push("name = ?");
+    bindings.push(parsed.data.name.trim());
+  }
   if (parsed.data.url !== undefined) {
     setParts.push("url = ?");
     bindings.push(parsed.data.url);
@@ -262,10 +288,7 @@ webhooks.patch(
     setParts.push("events = ?");
     bindings.push(JSON.stringify(Array.from(new Set(parsed.data.events))));
   }
-  if (parsed.data.secretKey !== undefined) {
-    setParts.push("secret_key = ?");
-    bindings.push(parsed.data.secretKey.trim());
-  }
+  // Security: HMAC secretKey is strictly read-only/immutable after creation
   if (parsed.data.isActive !== undefined) {
     setParts.push("is_active = ?");
     bindings.push(parsed.data.isActive ? 1 : 0);
@@ -289,7 +312,7 @@ webhooks.patch(
   }
 
   const updated = await c.env.DB.prepare(
-    `SELECT id, user_id, url, events, secret_key, is_active, last_triggered_at, last_status, created_at
+    `SELECT id, user_id, name, url, events, secret_key, is_active, last_triggered_at, last_status, created_at
      FROM webhooks WHERE id = ?`,
   )
     .bind(id)

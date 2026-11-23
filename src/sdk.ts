@@ -541,6 +541,8 @@ export type WebhookEvent =
   | string;
 
 export interface CreateWebhookOptions {
+  /** Human-readable name to identify the webhook */
+  name?: string;
   /** Public HTTPS/HTTP destination endpoint URL */
   url: string;
   /** Events to subscribe to (default: ['click.created', 'conversion.created']) */
@@ -554,6 +556,7 @@ export interface CreateWebhookOptions {
 export interface WebhookResponse {
   id: string;
   userId?: string;
+  name?: string;
   url: string;
   events: string[];
   secretKey: string;
@@ -564,9 +567,9 @@ export interface WebhookResponse {
 }
 
 export interface UpdateWebhookOptions {
+  name?: string;
   url?: string;
   events?: WebhookEvent[];
-  secretKey?: string;
   isActive?: boolean;
 }
 

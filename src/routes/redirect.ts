@@ -78,34 +78,69 @@ function safeInlineJson(value: unknown): string {
 
 function isSocialBot(userAgent: string): boolean {
   const ua = (userAgent || '').toLowerCase();
+  if (!ua) return false;
+  const isMobileWebView = ua.includes('iphone') || ua.includes('ipad') || ua.includes('android');
   return (
     ua.includes('twitterbot') ||
+    ua.includes('xbot') ||
     ua.includes('facebookexternalhit') ||
+    ua.includes('facebot') ||
+    ua.includes('meta-externalagent') ||
+    ua.includes('meta-externalfetcher') ||
     ua.includes('whatsapp') ||
     ua.includes('linkedinbot') ||
     ua.includes('discordbot') ||
     ua.includes('telegrambot') ||
     ua.includes('slackbot') ||
+    ua.includes('slack-imgproxy') ||
+    ua.includes('slack-imgbatcher') ||
     ua.includes('vkshare') ||
     ua.includes('pinterestbot') ||
-    (ua.includes('pinterest/') && ua.includes('bot')) ||
+    (ua.includes('pinterest/') && !isMobileWebView) ||
+    (ua.includes('pinterest/') && (ua.includes('bot') || ua.includes('pinterest.com'))) ||
     ua.includes('applebot') ||
     ua.includes('bingbot') ||
     ua.includes('googlebot') ||
     ua.includes('skypeuripreview') ||
+    ua.includes('microsoftpreview') ||
     ua.includes('embedly') ||
     ua.includes('quora link preview') ||
     ua.includes('outbrain') ||
-    ua.includes('threads') ||
+    (ua.includes('threads') && !isMobileWebView) ||
     ua.includes('bluesky') ||
-    ua.includes('mastodon') ||
-    ua.includes('redditbot')
+    ua.includes('mastodon/') ||
+    ua.includes('redditbot') ||
+    (ua.includes('snapchat') && !isMobileWebView) ||
+    ua.includes('viber') ||
+    ua.includes('line-poker') ||
+    ua.includes('kakaotalk-scrap') ||
+    ua.includes('bytespider') ||
+    ua.includes('iframely') ||
+    ua.includes('linkpreview') ||
+    ua.includes('socialsharepreview') ||
+    ua.includes('cardvalidator') ||
+    ua.includes('unfurl')
   );
 }
 
 // ─── OpenGraph & Twitter Card Preview Page for Social Networks ────────────────
-function socialPreviewPage(link: CachedLink, destination: string, shortUrl: string, apiOrigin: string): Response {
+function socialPreviewPage(
+  link: CachedLink,
+  destination: string,
+  shortUrl: string,
+  apiOrigin: string,
+  defaultDomain: string = 'lsho.cc',
+): Response {
   const safeBaseOrigin = apiOrigin.replace(/\/+$/, '');
+  const cleanDefaultDomain = (defaultDomain || 'lsho.cc').replace(/^https?:\/\//i, '').replace(/\/+$/, '');
+  const urlHost = (() => {
+    try {
+      return new URL(shortUrl).hostname || cleanDefaultDomain;
+    } catch {
+      return cleanDefaultDomain;
+    }
+  })();
+
   const title = link.ogTitle || link.metaTitle || 'LShorter — Smart Link Shortened';
   const description = link.ogDescription || 'Redirection instantanée optimisée par le réseau Edge mondial LShorter.';
   const rawBannerStyle = (link as any).bannerStyle || (link as any).banner_style;
@@ -113,32 +148,50 @@ function socialPreviewPage(link: CachedLink, destination: string, shortUrl: stri
   const isLarge = rawTwitterCard === 'summary_large_image' || rawBannerStyle === 'large_banner';
   const isDefaultBanner = (rawTwitterCard === 'summary' || rawBannerStyle === 'default_banner') && !isLarge;
   const cardType = isDefaultBanner ? 'summary' : 'summary_large_image';
-  const imgWidth = isDefaultBanner ? '512' : '1200';
-  const imgHeight = isDefaultBanner ? '512' : '630';
+  const imgWidth = isDefaultBanner ? '600' : '1200';
+  const imgHeight = isDefaultBanner ? '600' : '630';
 
   let image = link.ogImage || (link as any).banner_url || (link as any).bannerUrl || (link as any).imageUrl || '';
-  if (image && !image.startsWith('http://') && !image.startsWith('https://')) {
+  if (image && image.startsWith('data:')) {
+    image = '';
+  } else if (image && !image.startsWith('http://') && !image.startsWith('https://')) {
     image = `${safeBaseOrigin}${image.startsWith('/') ? '' : '/'}${image}`;
   }
 
-  if (cardType === 'summary') {
-    if (!image || image.includes('/api/og') || image.includes('default_banner')) {
-      image = `${safeBaseOrigin}/api/v1/images/default_icon.png`;
-    }
-  } else {
-    if (!image) {
-      image = `${safeBaseOrigin}/api/v1/images/default_banner.jpg`;
-    }
+  const isSvgOrPlaceholder =
+    !image ||
+    image.includes('.svg') ||
+    image.includes('dicebear') ||
+    image.includes('default_banner') ||
+    image.includes('default_icon');
+
+  if (isSvgOrPlaceholder) {
+    const encodedTitle = encodeURIComponent(title.substring(0, cardType === 'summary' ? 70 : 80));
+    const encodedDesc = encodeURIComponent(description.substring(0, 160));
+    const encodedSlug = encodeURIComponent(link.slug || '');
+    image =
+      cardType === 'summary'
+        ? `https://${cleanDefaultDomain}/banners/og.png?card=summary&title=${encodedTitle}&desc=${encodedDesc}&slug=${encodedSlug}`
+        : `https://${cleanDefaultDomain}/banners/og.png?title=${encodedTitle}&desc=${encodedDesc}&slug=${encodedSlug}`;
   }
 
   let imgType = 'image/jpeg';
-  if (image.includes('.png') || image.includes('/api/og') || image.includes('/icon-512')) {
+  if (image.includes('.png') || image.includes('/api/og') || image.includes('/banners/og') || image.includes('/icon-512')) {
     imgType = 'image/png';
   } else if (image.includes('.webp')) {
     imgType = 'image/webp';
   } else if (image.includes('.gif')) {
     imgType = 'image/gif';
   }
+
+  const isRestrictedLink = Boolean(
+    (link as any).isPasswordProtected ||
+      (link as any).is_password_protected ||
+      link.passwordHash ||
+      link.isCloaked ||
+      ((link as any).pathLockMode && (link as any).pathLockMode !== 'off'),
+  );
+  const safeHref = isRestrictedLink ? shortUrl : destination;
 
   const html = `<!DOCTYPE html>
 <html lang="fr" prefix="og: https://ogp.me/ns#">
@@ -148,9 +201,12 @@ function socialPreviewPage(link: CachedLink, destination: string, shortUrl: stri
   <title>${escapeHtml(title)}</title>
   <meta name="description" content="${escapeHtml(description)}">
   <meta name="author" content="LShorter">
-  <meta name="theme-color" content="#465FFF">
+  <meta name="theme-color" content="#0066FF">
+  <meta name="robots" content="index, follow, max-image-preview:large">
+  <link rel="canonical" href="${escapeHtml(shortUrl)}">
+  <link rel="image_src" href="${escapeHtml(image)}">
 
-  <!-- Open Graph / Facebook / LinkedIn / WhatsApp / Telegram / Discord -->
+  <!-- Open Graph / Facebook / LinkedIn / WhatsApp / Telegram / Discord / Slack / Pinterest -->
   <meta property="og:site_name" content="LShorter">
   <meta property="og:type" content="website">
   <meta property="og:url" content="${escapeHtml(shortUrl)}">
@@ -169,7 +225,7 @@ function socialPreviewPage(link: CachedLink, destination: string, shortUrl: stri
   <meta property="twitter:card" content="${cardType}">
   <meta name="twitter:site" content="@LShorter">
   <meta name="twitter:creator" content="@LShorter">
-  <meta name="twitter:domain" content="lsho.cc">
+  <meta name="twitter:domain" content="${escapeHtml(urlHost)}">
   <meta name="twitter:url" content="${escapeHtml(shortUrl)}">
   <meta name="twitter:title" content="${escapeHtml(title)}">
   <meta name="twitter:description" content="${escapeHtml(description)}">
@@ -177,16 +233,18 @@ function socialPreviewPage(link: CachedLink, destination: string, shortUrl: stri
   <meta property="twitter:image" content="${escapeHtml(image)}">
   <meta name="twitter:image:src" content="${escapeHtml(image)}">
   <meta name="twitter:image:alt" content="${escapeHtml(title)}">
+  <meta name="twitter:image:width" content="${imgWidth}">
+  <meta name="twitter:image:height" content="${imgHeight}">
 </head>
 <body style="background:#09090b;color:#fafafa;font-family:system-ui,-apple-system,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;padding:24px;box-sizing:border-box;">
   ${cardType === 'summary' ? `
   <div style="max-width:540px;width:100%;border-radius:14px;border:1px solid #27272a;overflow:hidden;background:#141416;box-shadow:0 10px 30px rgba(0,0,0,0.5);display:flex;align-items:center;padding:16px;gap:16px;box-sizing:border-box;">
     <img src="${escapeHtml(image)}" alt="${escapeHtml(title)}" style="width:96px;height:96px;min-width:96px;border-radius:10px;object-fit:cover;display:block;" />
     <div style="flex:1;min-width:0;">
-      <span style="font-size:11px;font-weight:700;color:#f97316;text-transform:uppercase;letter-spacing:0.5px;display:block;margin-bottom:4px;">${escapeHtml(link.slug || 'lsho.cc')}</span>
+      <span style="font-size:11px;font-weight:700;color:#0066FF;text-transform:uppercase;letter-spacing:0.5px;display:block;margin-bottom:4px;">${escapeHtml(link.slug || cleanDefaultDomain)}</span>
       <h2 style="margin:0 0 6px;font-size:15px;font-weight:600;color:#fff;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(title)}</h2>
       <p style="margin:0 0 12px;font-size:12px;color:#a1a1aa;line-height:1.4;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;">${escapeHtml(description)}</p>
-      <a href="${escapeHtml(destination)}" style="display:inline-block;padding:7px 14px;background:#465FFF;color:#fff;text-decoration:none;border-radius:6px;font-size:12px;font-weight:600;">Continuer &rarr;</a>
+      <a href="${escapeHtml(safeHref)}" style="display:inline-block;padding:7px 14px;background:#0066FF;color:#fff;text-decoration:none;border-radius:6px;font-size:12px;font-weight:600;">Continuer &rarr;</a>
     </div>
   </div>
   ` : `
@@ -195,7 +253,7 @@ function socialPreviewPage(link: CachedLink, destination: string, shortUrl: stri
     <div style="padding:20px;">
       <h2 style="margin:0 0 8px;font-size:18px;font-weight:600;color:#fff;">${escapeHtml(title)}</h2>
       <p style="margin:0 0 16px;font-size:13px;color:#a1a1aa;line-height:1.5;">${escapeHtml(description)}</p>
-      <a href="${escapeHtml(destination)}" style="display:inline-block;padding:10px 20px;background:#465FFF;color:#fff;text-decoration:none;border-radius:8px;font-size:13px;font-weight:600;">Continuer vers le site &rarr;</a>
+      <a href="${escapeHtml(safeHref)}" style="display:inline-block;padding:10px 20px;background:#0066FF;color:#fff;text-decoration:none;border-radius:8px;font-size:13px;font-weight:600;">Continuer vers le site &rarr;</a>
     </div>
   </div>
   `}
@@ -206,7 +264,8 @@ function socialPreviewPage(link: CachedLink, destination: string, shortUrl: stri
     status: 200,
     headers: {
       'Content-Type': 'text/html; charset=utf-8',
-      'Cache-Control': 'public, max-age=300, s-maxage=3600',
+      'Cache-Control': 'public, max-age=30, s-maxage=60, stale-while-revalidate=60',
+      'Vary': 'User-Agent',
     },
   });
 }
@@ -1059,7 +1118,13 @@ async function handleRedirect(
     const reqUrl = new URL(c.req.url);
     const fullShortUrl = `${reqUrl.protocol}//${reqUrl.host}${reqUrl.pathname}`;
     const apiOrigin = c.env.PUBLIC_API_URL || reqUrl.origin;
-    return socialPreviewPage(link, destination, fullShortUrl, apiOrigin);
+    return socialPreviewPage(
+      link,
+      destination,
+      fullShortUrl,
+      apiOrigin,
+      c.env.DEFAULT_DOMAIN || 'lsho.cc',
+    );
   }
 
   const isInternalProbe =
