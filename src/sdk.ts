@@ -82,6 +82,8 @@ export interface CreateLinkOptions {
   pathLockPrefix?:  string;
   pathLockMessage?: string;
   pathLockPassword?: string;
+  pathLockAction?:  'block' | 'fallback';
+  pathLockFallbackPath?: string;
   pixels?:          string[];
 }
 
@@ -123,7 +125,12 @@ export interface LinkResponse {
   maxClicks?:        number | null;
   fallbackUrl?:      string | null;
   pathLockMode?:     string | null;
+  pathLockPrefix?:   string | null;
+  pathLockMessage?:  string | null;
+  hasPathLockPassword?: boolean;
   pathLockPassword?: string | null;
+  pathLockAction?:   'block' | 'fallback' | string | null;
+  pathLockFallbackPath?: string | null;
   created_at:        string;
 }
 

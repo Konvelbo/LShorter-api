@@ -71,6 +71,8 @@ CREATE TABLE IF NOT EXISTS links (
     path_lock_prefix TEXT DEFAULT NULL,
     path_lock_message TEXT DEFAULT NULL,
     path_lock_password TEXT DEFAULT NULL,
+    path_lock_action TEXT DEFAULT 'block',
+    path_lock_fallback_path TEXT DEFAULT NULL,
     pixels TEXT DEFAULT NULL, -- JSON array of retargeting pixel IDs
     is_active BOOLEAN DEFAULT 1,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,

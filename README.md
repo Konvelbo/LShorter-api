@@ -15,7 +15,7 @@ L'API et le SDK TypeScript / JavaScript **LShorter** (ESM + CJS + types `.d.ts`,
 - ⚡ **Redirections Edge ultra-rapides (< 15ms)** propulsées par le réseau mondial Cloudflare.
 - 🎯 **Ciblage, Routage intelligent & A/B Testing (Plan PRO)** : Redirigez vos visiteurs selon leur pays (Géo-ciblage), continent, navigateur, OS, appareil (iOS, Android, Windows, Mac) ou pondération A/B.
 - 🔒 **Sécurité & Liens Protégés** : Protection par mot de passe, date d'expiration, quota maximal de clics (`maxClicks` + `fallbackUrl`), `hideReferrer` et masquage d'URL (*cloaking*).
-- 🛡️ **PathLock™ & Isolation de Navigation (Plan PRO)** : Verrouillez vos visiteurs sur une page unique (*strict*) ou un entonnoir de vente (*funnel*) avec écran de sécurité Edge anti-dispersion.
+- 🛡️ **PathLock™ & Isolation de Navigation (Plan PRO)** : Verrouillez vos visiteurs sur une page unique (*strict*) ou un tunnel de navigation (*funnel*) en liste blanche ou liste noire (`block:`), avec au choix un **écran PathLock** proposant les routes autorisées cliquables (`block`) ou une **redirection automatique** (`fallback`) vers une page dédiée (`pathLockFallbackPath`) protégée contre les boucles.
 - 🎯 **Pixels de Retargeting — 9 plateformes (Plan PRO+)** : Créez et injectez vos pixels **Meta/Facebook, Instagram, Google GA4, YouTube Ads, TikTok, LinkedIn, Pinterest, Snapchat et X** directement sur vos liens courts avec CSP stricte.
 - 🔔 **Webhooks temps réel signés HMAC-SHA256 (Plan PRO+)** : Créez et gérez vos endpoints d'écoute sur 12 événements (`click.created`, `conversion.created`, `qr.scanned`, etc.).
 - 📊 **Analytics & Tracking de conversions** : Mesurez les clics, pays, appareils, revenus générés (EPC) et exportez vos conversions en CSV.
@@ -132,20 +132,45 @@ const smartLink = await lsh.links.create({
 
 ### 4. Créer un lien avec PathLock™ (Navigation Restreinte — Plan PRO)
 
-Verrouillez vos visiteurs sur une page unique (`strict`) ou un entonnoir de conversion (`funnel`) sans risque de dispersion :
+Verrouillez vos visiteurs sur une page unique (`strict`) ou sur un tunnel de sous-chemins (`funnel`), en liste blanche ou en liste noire (`block:`). En mode `funnel`, choisissez le comportement en cas de clic hors périmètre :
+
+- **`pathLockAction: "block"`** *(défaut)* : affiche l'écran PathLock avec les routes autorisées cliquables pour revenir directement dans le tunnel.
+- **`pathLockAction: "fallback"`** : redirige automatiquement le visiteur vers une **page unique** du tunnel (`pathLockFallbackPath`, ou la page principale du lien si omis) avec un bandeau discret et une protection anti-boucle intégrée.
 
 ```typescript
-const pathLockedLink = await lsh.links.create({
+// Exemple A — Mode Page unique (Strict)
+const strictLink = await lsh.links.create({
   targetUrl: "https://maboutique.com/produit-luxe",
   slug: "produit-valide",
   pathLockMode: "strict", // "off" | "strict" | "funnel"
-  pathLockPrefix: "produit-luxe",
   pathLockPassword: "MonMotDePasseSecurite", // Jamais ré-exposé en clair via API publique
   pathLockMessage: "La navigation est restreinte à cette page de présentation.",
 });
 
-console.log("Lien sécurisé PathLock :", pathLockedLink.shortUrl);
+// Exemple B — Mode Tunnel (Funnel) avec redirection automatique (Fallback)
+const funnelLink = await lsh.links.create({
+  targetUrl: "https://maboutique.com/",
+  slug: "tunnel-vente",
+  pathLockMode: "funnel",
+  // Liste blanche : routes autorisées séparées par des virgules
+  // (ou préfixez par "block:" pour une liste noire, ex. "block:/pricing, /admin")
+  pathLockPrefix: "/offre, /checkout",
+  pathLockAction: "fallback", // "block" (écran PathLock) | "fallback" (redirection auto)
+  pathLockFallbackPath: "/offre", // Page relative unique (omis => page principale du lien)
+  pathLockMessage: "Accès hors périmètre — redirection vers la page autorisée.",
+});
+
+console.log("Lien sécurisé PathLock :", funnelLink.shortUrl);
 ```
+
+| Paramètre | Type | Description |
+| :--- | :--- | :--- |
+| `pathLockMode` | `"off" \| "strict" \| "funnel"` | Mode de restriction de navigation (`off` par défaut). |
+| `pathLockPrefix` | `string` | En mode `funnel`, préfixes autorisés (`/offre, /checkout`) ou bloqués (`block:/pricing, /admin`). |
+| `pathLockAction` | `"block" \| "fallback"` | *(Mode `funnel` uniquement)* `block` affiche l'écran PathLock ; `fallback` redirige automatiquement vers une page autorisée. Réinitialisé à `block` hors mode `funnel`. |
+| `pathLockFallbackPath` | `string` | *(Mode `funnel` + `fallback`)* Chemin relatif unique commençant par `/` (ex. `"/offre"`). Omis ou `null` = page principale du lien (`targetUrl`). Les URL absolues ou schémas externes (`//...`, `http://...`) sont rejetés (`422`). |
+| `pathLockMessage` | `string` | Message personnalisé affiché sur l'écran PathLock ou dans le bandeau discret de redirection. |
+| `pathLockPassword` | `string` | Code optionnel permettant de déverrouiller et quitter le périmètre restreint. |
 
 ---
 
@@ -182,8 +207,9 @@ await lsh.pixels.delete(pixel.id);
 Événements supportés : `click.created`, `click.unique`, `conversion.created`, `link.created`, `link.updated`, `link.deleted`, `link.expired`, `qr.scanned`, `target.reached`, `subscription.activated`, `subscription.cancelled`, `subscription.renewed`.
 
 ```typescript
-// Créer un abonnement webhook (clé secrète HMAC générée automatiquement si omise)
+// Créer un abonnement webhook (clé secrète HMAC générée automatiquement et immuable après création)
 const webhook = await lsh.webhooks.create({
+  name: "Backend Production",
   url: "https://mon-serveur.com/api/webhooks/lshorter",
   events: ["click.created", "conversion.created", "qr.scanned"],
   isActive: true,
@@ -191,10 +217,10 @@ const webhook = await lsh.webhooks.create({
 
 console.log("Secret HMAC à vérifier :", webhook.secretKey);
 
-// Lister, consulter, modifier ou supprimer
+// Lister, consulter, modifier (name, url, events, isActive) ou supprimer
 const webhooks = await lsh.webhooks.list();
 const fetched = await lsh.webhooks.get(webhook.id);
-await lsh.webhooks.update(webhook.id, { isActive: false });
+await lsh.webhooks.update(webhook.id, { name: "Backend Staging", isActive: false });
 await lsh.webhooks.delete(webhook.id);
 ```
 
@@ -281,7 +307,7 @@ try {
 
 | Module | Méthode | Description |
 | :--- | :--- | :--- |
-| `lsh.links` | `.create(options)` | Créer un lien court (routage, A/B, PathLock™, mot de passe, pixels, OG) |
+| `lsh.links` | `.create(options)` | Créer un lien court (routage, A/B, PathLock™ strict/funnel/fallback, mot de passe, pixels, OG) |
 | `lsh.links` | `.list(options)` | Lister ses liens avec pagination (`page`, `limit`) |
 | `lsh.links` | `.get(id)` | Récupérer les détails d'un lien (mots de passe masqués) |
 | `lsh.links` | `.update(id, options)` | Modifier la destination, le statut, les tags, les pixels ou le routage |

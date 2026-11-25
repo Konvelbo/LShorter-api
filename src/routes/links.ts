@@ -89,6 +89,25 @@ async function verifyOwnedPixelIds(
   return pixelIds.every((pid) => owned.has(pid));
 }
 
+let pathLockFallbackColsEnsured = false;
+
+async function ensurePathLockFallbackColumns(db: D1Database): Promise<void> {
+  if (pathLockFallbackColsEnsured) return;
+  await Promise.allSettled([
+    db.prepare(`ALTER TABLE links ADD COLUMN path_lock_action TEXT DEFAULT 'block'`).run().catch(() => {}),
+    db.prepare(`ALTER TABLE links ADD COLUMN path_lock_fallback_path TEXT DEFAULT NULL`).run().catch(() => {}),
+  ]);
+  pathLockFallbackColsEnsured = true;
+}
+
+function normalizePathLockFallbackPath(raw: unknown): string | null {
+  const s = typeof raw === "string" ? raw.trim() : "";
+  if (!s) return null;
+  if (!s.startsWith("/") || s.startsWith("//") || /[\s\x00-\x1F\x7F]/.test(s)) return null;
+  const cleaned = s.replace(/\/{2,}/g, "/");
+  return cleaned === "/" ? "/" : cleaned.replace(/\/+$/, "");
+}
+
 const links = new Hono<{
   Bindings: CloudflareBindings;
   Variables: { auth: AuthContext };
@@ -677,6 +696,18 @@ links.post(
       parsed.data.pathLockMessage || parsed.data.path_lock_message || null;
     const finalPathLockPassword =
       parsed.data.pathLockPassword || parsed.data.path_lock_password || null;
+    const rawPathLockAction =
+      parsed.data.pathLockAction || parsed.data.path_lock_action || "block";
+    const finalPathLockAction: "block" | "fallback" =
+      finalPathLockMode === "funnel" && rawPathLockAction === "fallback"
+        ? "fallback"
+        : "block";
+    const finalPathLockFallbackPath =
+      finalPathLockAction === "fallback"
+        ? normalizePathLockFallbackPath(
+            parsed.data.pathLockFallbackPath ?? parsed.data.path_lock_fallback_path,
+          )
+        : null;
 
     const cleanRoutingRules =
       Array.isArray(routingRules) && routingRules.length > 0
@@ -723,6 +754,8 @@ links.post(
       }
     }
 
+    await ensurePathLockFallbackColumns(c.env.DB);
+
     let inserted = false;
     while (!inserted && attempts < maxAttempts) {
       attempts++;
@@ -736,9 +769,10 @@ links.post(
               ab_variations, main_weight, redirect_type, pass_params,
               max_clicks, fallback_url, password_plain,
               path_lock_mode, path_lock_prefix, path_lock_message, path_lock_password,
+              path_lock_action, path_lock_fallback_path,
               pixels,
               created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         )
           .bind(
             linkId,
@@ -775,6 +809,8 @@ links.post(
             finalPathLockPrefix,
             finalPathLockMessage,
             finalPathLockPassword,
+            finalPathLockAction,
+            finalPathLockFallbackPath,
             cleanPixels ? JSON.stringify(cleanPixels) : null,
             now(),
             now(),
@@ -835,6 +871,10 @@ links.post(
         path_lock_message: finalPathLockMessage,
         pathLockPassword: finalPathLockPassword,
         path_lock_password: finalPathLockPassword,
+        pathLockAction: finalPathLockAction,
+        path_lock_action: finalPathLockAction,
+        pathLockFallbackPath: finalPathLockFallbackPath,
+        path_lock_fallback_path: finalPathLockFallbackPath,
         pixels: cleanPixels,
         pixel_ids: cleanPixels,
       });
@@ -890,6 +930,10 @@ links.post(
           path_lock_prefix: finalPathLockPrefix,
           pathLockMessage: finalPathLockMessage,
           path_lock_message: finalPathLockMessage,
+          pathLockAction: finalPathLockAction,
+          path_lock_action: finalPathLockAction,
+          pathLockFallbackPath: finalPathLockFallbackPath,
+          path_lock_fallback_path: finalPathLockFallbackPath,
           hasPathLockPassword: Boolean(finalPathLockPassword),
           has_path_lock_password: Boolean(finalPathLockPassword),
           pathLockPassword: isFrontendCaller ? finalPathLockPassword : undefined,
@@ -1313,6 +1357,53 @@ links.patch("/:id", async (c) => {
     setParts.push("path_lock_password = ?");
     bindings.push(plPwd || null);
   }
+  const effectivePathLockModeForAction =
+    updates.pathLockMode ??
+    (updates as any).path_lock_mode ??
+    (existing as any)?.path_lock_mode ??
+    "off";
+  if (
+    updates.pathLockAction !== undefined ||
+    (updates as any).path_lock_action !== undefined ||
+    (effectivePathLockModeForAction !== "funnel" &&
+      (updates.pathLockMode !== undefined || (updates as any).path_lock_mode !== undefined))
+  ) {
+    await ensurePathLockFallbackColumns(c.env.DB);
+    const rawAct =
+      updates.pathLockAction !== undefined
+        ? updates.pathLockAction
+        : (updates as any).path_lock_action !== undefined
+          ? (updates as any).path_lock_action
+          : (existing as any)?.path_lock_action || "block";
+    const resolvedAct =
+      effectivePathLockModeForAction === "funnel" && rawAct === "fallback"
+        ? "fallback"
+        : "block";
+    setParts.push("path_lock_action = ?");
+    bindings.push(resolvedAct);
+    if (resolvedAct !== "fallback") {
+      setParts.push("path_lock_fallback_path = ?");
+      bindings.push(null);
+    }
+  }
+  if (
+    updates.pathLockFallbackPath !== undefined ||
+    (updates as any).path_lock_fallback_path !== undefined
+  ) {
+    await ensurePathLockFallbackColumns(c.env.DB);
+    const rawFbPath =
+      updates.pathLockFallbackPath !== undefined
+        ? updates.pathLockFallbackPath
+        : (updates as any).path_lock_fallback_path;
+    const normalizedFbPath =
+      effectivePathLockModeForAction === "funnel"
+        ? normalizePathLockFallbackPath(rawFbPath)
+        : null;
+    if (!setParts.includes("path_lock_fallback_path = ?")) {
+      setParts.push("path_lock_fallback_path = ?");
+      bindings.push(normalizedFbPath);
+    }
+  }
   if (updates.password !== undefined) {
     const hash = updates.password ? await sha256(updates.password) : null;
     setParts.push("password_hash = ?");
@@ -1469,6 +1560,10 @@ links.patch("/:id", async (c) => {
           path_lock_message: updated.path_lock_message || null,
           pathLockPassword: updated.path_lock_password || null,
           path_lock_password: updated.path_lock_password || null,
+          pathLockAction: updated.path_lock_action || "block",
+          path_lock_action: updated.path_lock_action || "block",
+          pathLockFallbackPath: updated.path_lock_fallback_path || null,
+          path_lock_fallback_path: updated.path_lock_fallback_path || null,
           pixels: parsedUpdatedPixels,
           pixel_ids: parsedUpdatedPixels,
         }),
@@ -1524,6 +1619,10 @@ links.patch("/:id", async (c) => {
     has_path_lock_password: Boolean(updated?.path_lock_password),
     pathLockPassword: isFrontendValid ? (updated?.path_lock_password || null) : undefined,
     path_lock_password: isFrontendValid ? (updated?.path_lock_password || null) : undefined,
+    pathLockAction: updated?.path_lock_action || "block",
+    path_lock_action: updated?.path_lock_action || "block",
+    pathLockFallbackPath: updated?.path_lock_fallback_path || null,
+    path_lock_fallback_path: updated?.path_lock_fallback_path || null,
     pixels: parsedUpdatedPixels,
     pixel_ids: parsedUpdatedPixels,
     bannerStyle: resolvedUpdatedBanner.bannerStyle,
@@ -1570,6 +1669,7 @@ links.get("/", async (c) => {
               ab_variations, main_weight, redirect_type, pass_params,
               max_clicks, fallback_url, password_plain,
               path_lock_mode, path_lock_prefix, path_lock_message, path_lock_password,
+              path_lock_action, path_lock_fallback_path,
               pixels,
               (CASE WHEN password_hash IS NOT NULL OR password_plain IS NOT NULL THEN 1 ELSE 0 END) as has_password,
               created_at
@@ -1637,6 +1737,10 @@ links.get("/", async (c) => {
         has_path_lock_password: Boolean((row as any).path_lock_password),
         pathLockPassword: isFrontend ? ((row as any).path_lock_password || null) : undefined,
         path_lock_password: isFrontend ? ((row as any).path_lock_password || null) : undefined,
+        pathLockAction: ((row as any).path_lock_action as string) || "block",
+        path_lock_action: ((row as any).path_lock_action as string) || "block",
+        pathLockFallbackPath: ((row as any).path_lock_fallback_path as string) || null,
+        path_lock_fallback_path: ((row as any).path_lock_fallback_path as string) || null,
         maxClicks:
           row.max_clicks !== null && row.max_clicks !== undefined
             ? Number(row.max_clicks)
@@ -1774,6 +1878,10 @@ links.get("/:id", async (c) => {
     path_lock_prefix: link["path_lock_prefix"] || null,
     pathLockMessage: link["path_lock_message"] || null,
     path_lock_message: link["path_lock_message"] || null,
+    pathLockAction: link["path_lock_action"] || "block",
+    path_lock_action: link["path_lock_action"] || "block",
+    pathLockFallbackPath: link["path_lock_fallback_path"] || null,
+    path_lock_fallback_path: link["path_lock_fallback_path"] || null,
     hasPathLockPassword: Boolean(link["path_lock_password"]),
     has_path_lock_password: Boolean(link["path_lock_password"]),
     pathLockPassword: isFrontend ? (link["path_lock_password"] || null) : undefined,

@@ -48,6 +48,10 @@ interface CachedLink {
   path_lock_message?: string | null;
   pathLockPassword?: string | null;
   path_lock_password?: string | null;
+  pathLockAction?:  string | null;
+  path_lock_action?: string | null;
+  pathLockFallbackPath?: string | null;
+  path_lock_fallback_path?: string | null;
   isActive?:        boolean;
   is_active?:       number;
   expiresAt?:       string | null;
@@ -337,15 +341,66 @@ async function cloakedPage(destination: string, title: string | null, slug: stri
   const mode = link?.pathLockMode || link?.path_lock_mode || 'off';
   const isPathLocked = mode !== 'off';
   const rawPrefix = String(link?.pathLockPrefix || link?.path_lock_prefix || '');
+  const action =
+    mode === 'funnel' && (link?.pathLockAction === 'fallback' || link?.path_lock_action === 'fallback')
+      ? 'fallback'
+      : 'block';
+  const rawFallbackPath = String(link?.pathLockFallbackPath || link?.path_lock_fallback_path || '').trim();
   const safePrefix = escapeHtml(rawPrefix);
   const cleanPrefix = safePrefix.replace(/^\/+/, '').replace(/\/+$/, '');
   const authorizedPath = cleanPrefix || safeSlug;
+
+  // Build navigable authorized routes for clickable perimeter pills (Option 1)
+  let destBaseOrigin = '';
+  let destBasePath = '/';
+  try {
+    const parsedDest = new URL(destination.startsWith('http') ? destination : `https://${destination}`);
+    destBaseOrigin = parsedDest.origin;
+    destBasePath = parsedDest.pathname || '/';
+  } catch {}
+  const isBlacklistPrefix = /^(block:|blacklist:|deny:)/i.test(rawPrefix.trim());
+  const navigableRoutes: Array<{ label: string; url: string }> = [];
+  const seenNavPaths = new Set<string>();
+  const addNavRoute = (p: string) => {
+    const clean = '/' + String(p || '/').replace(/^\/+/, '').replace(/\/+$/, '');
+    const key = clean.toLowerCase();
+    if (seenNavPaths.has(key)) return;
+    seenNavPaths.add(key);
+    const fullUrl = destBaseOrigin ? `${destBaseOrigin}${clean}` : destination;
+    navigableRoutes.push({ label: clean, url: fullUrl });
+  };
+  if (mode === 'strict' || isBlacklistPrefix) {
+    addNavRoute(destBasePath);
+  } else {
+    addNavRoute(destBasePath);
+    for (const tok of rawPrefix.split(/[,\n\r;| \t]+/)) {
+      let item = tok.trim();
+      if (!item || item === '*' || item === '/*' || item.startsWith('!') || item.startsWith('-')) continue;
+      if (/^(https?:)?\/\//i.test(item)) {
+        try { item = new URL(item.startsWith('//') ? `https:${item}` : item).pathname || '/'; } catch {}
+      }
+      item = (item.split(/[?#]/)[0] || '').replace(/\/\*+$/, '');
+      if (item) addNavRoute(item);
+    }
+  }
+  const perimeterButtonsHtml = navigableRoutes
+    .map(
+      (r) =>
+        `<button type="button" class="gate-route-btn" data-route-url="${escapeHtml(r.url)}" onclick="navigateToAllowedRoute(this.getAttribute('data-route-url'))">${escapeHtml(r.label)}</button>`,
+    )
+    .join('');
+
   const safeMessage = escapeHtml(
     link?.pathLockMessage ||
     link?.path_lock_message ||
     (mode === 'strict'
       ? 'Le propriétaire de ce lien a restreint la navigation à cette page unique. Toute navigation externe est bloquée.'
       : 'Le propriétaire de ce lien a restreint la navigation au tunnel d\'accès autorisé. Toute navigation externe est verrouillée.')
+  );
+  const fallbackToastText = escapeHtml(
+    link?.pathLockMessage ||
+    link?.path_lock_message ||
+    'Accès hors périmètre — redirection vers la page autorisée.'
   );
   const rawPassword = String(link?.pathLockPassword || link?.path_lock_password || '');
   const expectedPasswordHash = rawPassword ? await sha256(rawPassword) : '';
@@ -519,15 +574,26 @@ async function cloakedPage(destination: string, title: string | null, slug: stri
       font-size: 12.5px; line-height: 1.5; color: #D5D9E2; text-align: center; word-break: break-word;
     }
     .gate-perimeter {
-      width: 100%; box-sizing: border-box; margin-top: 16px; height: 46px; padding: 0 14px;
-      display: flex; align-items: center; justify-content: center; gap: 8px;
+      width: 100%; box-sizing: border-box; margin-top: 16px; min-height: 46px; padding: 10px 14px;
+      display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px;
       border-radius: 12px; background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.1);
     }
-    .gate-perimeter span { font-size: 13px; color: #A9AFBA; }
-    .gate-perimeter code {
-      font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace; font-size: 13px; font-weight: 600;
-      color: #A9C4FF; padding: 3px 8px; border-radius: 6px; background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.1);
+    .gate-perimeter span { font-size: 12.5px; color: #A9AFBA; }
+    .gate-routes-wrap { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 6px; }
+    .gate-route-btn {
+      font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace; font-size: 12.5px; font-weight: 600;
+      color: #A9C4FF; padding: 4px 10px; border-radius: 8px; background: rgba(0,0,0,0.35);
+      border: 1px solid rgba(169,196,255,0.22); transition: background 0.15s, border-color 0.15s, color 0.15s;
     }
+    .gate-route-btn:hover { background: rgba(37,99,235,0.22); border-color: rgba(96,165,250,0.55); color: #fff; }
+    #fallback-toast {
+      position: fixed; top: 72px; left: 50%; transform: translateX(-50%) translateY(-10px);
+      z-index: 950; max-width: min(92vw, 460px); padding: 9px 14px; border-radius: 10px;
+      background: rgba(17, 18, 22, 0.94); border: 1px solid rgba(255,255,255,0.14);
+      color: #E4E7EC; font-size: 12.5px; font-weight: 500; box-shadow: 0 10px 28px rgba(0,0,0,0.45);
+      opacity: 0; pointer-events: none; transition: opacity 0.2s ease, transform 0.2s ease;
+    }
+    #fallback-toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
     .btn-primary {
       width: 100%; margin-top: 14px; height: 46px; display: flex; align-items: center; justify-content: center;
       gap: 8px; border: none; border-radius: 12px; background: #2563EB; color: #FFFFFF; font-size: 14.5px; font-weight: 600;
@@ -569,6 +635,9 @@ async function cloakedPage(destination: string, title: string | null, slug: stri
 
   <!-- Top Progress Bar for Instant Reload Feedback -->
   <div id="reload-progress"></div>
+
+  <!-- Subtle Fallback Redirect Toast -->
+  <div id="fallback-toast" role="status" aria-live="polite">${fallbackToastText}</div>
 
   <!-- Topbar -->
   <div id="topbar">
@@ -639,10 +708,10 @@ async function cloakedPage(destination: string, title: string | null, slug: stri
       <!-- Description part -->
       <div class="gate-desc-box">${safeMessage}</div>
 
-      <!-- Authorized perimeter box -->
+      <!-- Authorized perimeter box (clickable routes — Option 1) -->
       <div class="gate-perimeter">
-        <span>Périmètre autorisé</span>
-        <code>/${authorizedPath}</code>
+        <span>Pages autorisées</span>
+        <div class="gate-routes-wrap">${perimeterButtonsHtml || `<code>/${authorizedPath}</code>`}</div>
       </div>
 
       <!-- Return CTA button -->
@@ -684,7 +753,39 @@ async function cloakedPage(destination: string, title: string | null, slug: stri
     var targetUrl = ${safeInlineJson(destination)};
     var lockMode = ${safeInlineJson(mode)};
     var lockPrefix = ${safeInlineJson(rawPrefix)};
+    var lockAction = ${safeInlineJson(action)};
+    var lockFallbackPath = ${safeInlineJson(rawFallbackPath)};
     var slug = ${safeInlineJson(slug || '')};
+    var fallbackToastTimer = null;
+
+    function showFallbackToast() {
+      var el = document.getElementById("fallback-toast");
+      if (!el) return;
+      el.classList.add("show");
+      if (fallbackToastTimer) clearTimeout(fallbackToastTimer);
+      fallbackToastTimer = setTimeout(function() {
+        el.classList.remove("show");
+      }, 2500);
+    }
+
+    function navigateToAllowedRoute(routeUrl) {
+      if (!routeUrl) return restoreOriginalPage();
+      var gate = document.getElementById("blocking-gate");
+      var frame = document.getElementById("main-iframe");
+      var icon = document.getElementById("reload-icon");
+      var text = document.getElementById("reload-text");
+      var prog = document.getElementById("reload-progress");
+      if (icon) icon.classList.add("spin-icon");
+      if (text) text.textContent = "Actualisation…";
+      if (prog) {
+        prog.style.transform = "scaleX(0.75)";
+        prog.classList.add("loading");
+      }
+      if (gate) gate.style.display = "none";
+      if (frame) {
+        frame.src = routeUrl;
+      }
+    }
     var expectedPasswordHash = ${safeInlineJson(expectedPasswordHash)};
 
     var isDevUnlocked = false;
@@ -820,7 +921,19 @@ async function cloakedPage(destination: string, title: string | null, slug: stri
     }
 
     window.addEventListener("message", function(e) {
-      if (e.data && typeof e.data === "object" && e.data.type === "PATHLOCK_NAVIGATE") {
+      if (!e.data || typeof e.data !== "object") return;
+      if (e.data.type === "PATHLOCK_FALLBACK") {
+        showFallbackToast();
+        if (e.data.navigateUrl && e.data.fromNestedEmbed) {
+          navigateToAllowedRoute(String(e.data.navigateUrl));
+        }
+        return;
+      }
+      if (e.data.type === "PATHLOCK_NAVIGATE") {
+        if (e.data.blocked) {
+          document.getElementById("blocking-gate").style.display = "flex";
+          return;
+        }
         checkPath(String(e.data.url || ""));
       }
     });
@@ -900,7 +1013,8 @@ async function handleRedirect(
         `SELECT id, user_id, target_url, routing_rules, geo_targeting, device_targeting,
                 is_active, expires_at, password_hash, is_cloaked, hide_referrer, meta_title,
                 og_title, og_description, og_image, twitter_card, banner_style, clicks_count, max_clicks, fallback_url,
-                path_lock_mode, path_lock_prefix, path_lock_message, path_lock_password, pixels
+                path_lock_mode, path_lock_prefix, path_lock_message, path_lock_password,
+                path_lock_action, path_lock_fallback_path, pixels
          FROM links
          WHERE (slug = ? OR slug = ? OR slug = ? OR LOWER(slug) = LOWER(?) OR LOWER(slug) = LOWER(?))
          ORDER BY created_at DESC
@@ -973,6 +1087,10 @@ async function handleRedirect(
       path_lock_message: row.path_lock_message || null,
       pathLockPassword: row.path_lock_password || null,
       path_lock_password: row.path_lock_password || null,
+      pathLockAction:  row.path_lock_action || 'block',
+      path_lock_action: row.path_lock_action || 'block',
+      pathLockFallbackPath: row.path_lock_fallback_path || null,
+      path_lock_fallback_path: row.path_lock_fallback_path || null,
       pixels:          row.pixels ? (typeof row.pixels === 'string' ? JSON.parse(row.pixels) : row.pixels) : [],
       pixel_ids:       row.pixels ? (typeof row.pixels === 'string' ? JSON.parse(row.pixels) : row.pixels) : [],
     };

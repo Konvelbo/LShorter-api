@@ -254,14 +254,29 @@ function createMockEnv(store: MockStore) {
               path_lock_prefix: binds[31],
               path_lock_message: binds[32],
               path_lock_password: binds[33],
-              pixels: binds[34],
+              path_lock_action: binds[34],
+              path_lock_fallback_path: binds[35],
+              pixels: binds[36],
               clicks_count: 0,
               unique_clicks: 0,
-              created_at: binds[35],
-              updated_at: binds[36],
+              created_at: binds[37],
+              updated_at: binds[38],
             };
             store.links.set(row.id, row);
             return { meta: { changes: 1 } };
+          }
+
+          if (s.startsWith("UPDATE links SET")) {
+            const id = binds[binds.length - 1];
+            const row = store.links.get(id);
+            if (row && s.includes(" WHERE id = ?")) {
+              const setClause = s.slice("UPDATE links SET ".length, s.indexOf(" WHERE id = ?"));
+              const cols = setClause.split(",").map((part) => part.trim().split(" ")[0]);
+              cols.forEach((col, i) => {
+                row[col] = binds[i];
+              });
+            }
+            return { meta: { changes: row ? 1 : 0 } };
           }
 
           if (s.startsWith("DELETE FROM links WHERE id = ?")) {
@@ -1466,6 +1481,82 @@ describe("LShorter API Security Hardening & 9-Platform Pixels", () => {
     expect(patchedJson.data.webhook.url).toBe("https://hooks.example.org/crm-v2");
     expect(patchedJson.data.webhook.events).toEqual(["click.created", "link.updated", "qr.scanned"]);
     expect(patchedJson.data.webhook.secretKey).toBe(originalSecret);
+  });
+
+  // ── 12. PathLock Tunnel Fallback action & single-choice path persistence ────
+  it("persists pathLockAction & pathLockFallbackPath in Tunnel mode, resets on Strict, and rejects unsafe fallback paths", async () => {
+    const proHeaders = {
+      Authorization: `Bearer ${PRO_API_KEY}`,
+      "Content-Type": "application/json",
+    };
+
+    // 1. Unsafe fallback path rejected with 422
+    const badRes = await app.fetch(
+      new Request("https://api.test/api/v1/links", {
+        method: "POST",
+        headers: proHeaders,
+        body: JSON.stringify({
+          targetUrl: "https://ui.shadcn.com/",
+          pathLockMode: "funnel",
+          pathLockPrefix: "/create, /docs/installation",
+          pathLockAction: "fallback",
+          pathLockFallbackPath: "//evil.com/phish",
+        }),
+      }),
+      env,
+      execCtx,
+    );
+    expect(badRes.status).toBe(422);
+
+    // 2. Valid Tunnel fallback persists across POST -> GET
+    const createRes = await app.fetch(
+      new Request("https://api.test/api/v1/links", {
+        method: "POST",
+        headers: proHeaders,
+        body: JSON.stringify({
+          targetUrl: "https://ui.shadcn.com/",
+          pathLockMode: "funnel",
+          pathLockPrefix: "/create, /docs/installation",
+          pathLockAction: "fallback",
+          pathLockFallbackPath: "/create",
+        }),
+      }),
+      env,
+      execCtx,
+    );
+    expect(createRes.status).toBe(201);
+    const created: any = await createRes.json();
+    expect(created.data.pathLockAction).toBe("fallback");
+    expect(created.data.pathLockFallbackPath).toBe("/create");
+
+    const getRes = await app.fetch(
+      new Request(`https://api.test/api/v1/links/${created.data.id}`, {
+        headers: { Authorization: `Bearer ${PRO_API_KEY}` },
+      }),
+      env,
+      execCtx,
+    );
+    expect(getRes.status).toBe(200);
+    const fetched: any = await getRes.json();
+    expect(fetched.data.pathLockAction).toBe("fallback");
+    expect(fetched.data.pathLockFallbackPath).toBe("/create");
+
+    // 3. Switching mode to Strict forces pathLockAction="block" and clears fallbackPath
+    const patchRes = await app.fetch(
+      new Request(`https://api.test/api/v1/links/${created.data.id}`, {
+        method: "PATCH",
+        headers: proHeaders,
+        body: JSON.stringify({
+          pathLockMode: "strict",
+        }),
+      }),
+      env,
+      execCtx,
+    );
+    expect(patchRes.status).toBe(200);
+    const patched: any = await patchRes.json();
+    expect(patched.data.pathLockAction).toBe("block");
+    expect(patched.data.pathLockFallbackPath).toBeNull();
   });
 });
 

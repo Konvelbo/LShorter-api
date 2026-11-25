@@ -387,6 +387,38 @@ export const CreateLinkSchema = z.object({
   path_lock_message: z.string().max(500).optional().nullable(),
   pathLockPassword: z.string().max(100).optional().nullable(),
   path_lock_password: z.string().max(100).optional().nullable(),
+  pathLockAction:  z.enum(["block", "fallback"]).optional().nullable(),
+  path_lock_action: z.enum(["block", "fallback"]).optional().nullable(),
+  pathLockFallbackPath: z
+    .string()
+    .trim()
+    .max(255)
+    .refine(
+      (v) =>
+        !v ||
+        (v.startsWith("/") &&
+          !v.startsWith("//") &&
+          !/[\s\x00-\x1F\x7F]/.test(v) &&
+          !/^\/?(javascript|data|vbscript|file):/i.test(v)),
+      "Fallback path must be a safe relative path starting with /"
+    )
+    .optional()
+    .nullable(),
+  path_lock_fallback_path: z
+    .string()
+    .trim()
+    .max(255)
+    .refine(
+      (v) =>
+        !v ||
+        (v.startsWith("/") &&
+          !v.startsWith("//") &&
+          !/[\s\x00-\x1F\x7F]/.test(v) &&
+          !/^\/?(javascript|data|vbscript|file):/i.test(v)),
+      "Fallback path must be a safe relative path starting with /"
+    )
+    .optional()
+    .nullable(),
   // ── Retargeting Pixels ───────────────────────────────────────────────────
   pixels:          z.any().optional().nullable(),
   pixelIds:        z.array(z.string().max(100)).max(25).optional().nullable(),
@@ -449,6 +481,38 @@ export const UpdateLinkSchema = z.object({
   path_lock_message: z.string().max(500).optional().nullable(),
   pathLockPassword: z.string().max(100).optional().nullable(),
   path_lock_password: z.string().max(100).optional().nullable(),
+  pathLockAction:  z.enum(["block", "fallback"]).optional().nullable(),
+  path_lock_action: z.enum(["block", "fallback"]).optional().nullable(),
+  pathLockFallbackPath: z
+    .string()
+    .trim()
+    .max(255)
+    .refine(
+      (v) =>
+        !v ||
+        (v.startsWith("/") &&
+          !v.startsWith("//") &&
+          !/[\s\x00-\x1F\x7F]/.test(v) &&
+          !/^\/?(javascript|data|vbscript|file):/i.test(v)),
+      "Fallback path must be a safe relative path starting with /"
+    )
+    .optional()
+    .nullable(),
+  path_lock_fallback_path: z
+    .string()
+    .trim()
+    .max(255)
+    .refine(
+      (v) =>
+        !v ||
+        (v.startsWith("/") &&
+          !v.startsWith("//") &&
+          !/[\s\x00-\x1F\x7F]/.test(v) &&
+          !/^\/?(javascript|data|vbscript|file):/i.test(v)),
+      "Fallback path must be a safe relative path starting with /"
+    )
+    .optional()
+    .nullable(),
   pixels:          z.any().optional().nullable(),
   pixelIds:        z.array(z.string().max(100)).max(25).optional().nullable(),
   pixel_ids:       z.array(z.string().max(100)).max(25).optional().nullable(),
