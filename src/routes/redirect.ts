@@ -103,8 +103,6 @@ function isSocialBot(userAgent: string): boolean {
     (ua.includes('pinterest/') && !isMobileWebView) ||
     (ua.includes('pinterest/') && (ua.includes('bot') || ua.includes('pinterest.com'))) ||
     ua.includes('applebot') ||
-    ua.includes('bingbot') ||
-    ua.includes('googlebot') ||
     ua.includes('skypeuripreview') ||
     ua.includes('microsoftpreview') ||
     ua.includes('embedly') ||
@@ -206,7 +204,7 @@ function socialPreviewPage(
   <meta name="description" content="${escapeHtml(description)}">
   <meta name="author" content="LShorter">
   <meta name="theme-color" content="#0066FF">
-  <meta name="robots" content="index, follow, max-image-preview:large">
+  <meta name="robots" content="noindex, nofollow, max-image-preview:large">
   <link rel="canonical" href="${escapeHtml(shortUrl)}">
   <link rel="image_src" href="${escapeHtml(image)}">
 
@@ -270,6 +268,7 @@ function socialPreviewPage(
       'Content-Type': 'text/html; charset=utf-8',
       'Cache-Control': 'public, max-age=30, s-maxage=60, stale-while-revalidate=60',
       'Vary': 'User-Agent',
+      'X-Robots-Tag': 'noindex, nofollow',
     },
   });
 }
